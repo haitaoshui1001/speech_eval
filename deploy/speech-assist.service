@@ -4,7 +4,7 @@
 # 关键点：**只有一个 uvicorn 进程，绝不加 --workers**。
 # 分析队列、抽帧线程池、千问在途请求闸门都在进程内存里，两个 worker 等于两套
 # 互不知情的池子——同时分析路数翻倍、去重失效、/health 只反映其中一个进程。
-# 参见 docs/设计报告.md §14.1。
+# 参见 docs/设计报告.md §15.1。
 
 [Unit]
 Description=演讲评分系统 (speech-assist)

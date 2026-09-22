@@ -4,8 +4,8 @@
     在 Windows 上打服务器发布包：speech-assist-YYYYMMDD.tar.gz
 
 .DESCRIPTION
-    本仓库不是 git 仓库（没有 .git），服务器上无 clone 来源，
-    所以发布链路只能是「本地打包 -> scp 上传 -> 解压 -> install.sh/update.sh」。
+    服务器上没有仓库凭据、/opt/speech-assist 也不是 git 工作树（git 远端只做代码备份），
+    所以发布链路是「本地打包 -> scp 上传 -> 解压 -> install.sh/update.sh」。
 
     白名单打包，只带运行需要的东西：
         app/  deploy/  docs/  tests/(可选)  requirements.txt  评价标准.txt  .env.example
