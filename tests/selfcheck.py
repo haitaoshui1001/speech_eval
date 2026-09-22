@@ -137,6 +137,33 @@ def main() -> int:
     results.append(ok("全站聚合带最近消耗明细",
                       bool(db.token_usage(per_video=5)["videos"]), f"均次 {db.token_usage()['avg_per_video']}"))
 
+    probe = video_ids["alice"][0]
+    qa_client = QwenClient()
+    qa_client.mark("导师提问")._track(
+        {"messages": [{"role": "user", "content": "请针对本稿出 3 道思考题"}]},
+        Completion(text='{"questions": ["一", "二", "三"]}', model="mock",
+                   usage={"prompt_tokens": 900, "completion_tokens": 100, "total_tokens": 1000}))
+    merged = db.add_usage(probe, qa_client.usage_summary())
+    row = db.get_video(probe)
+    results.append(ok("按需调用累加用量且不覆盖分析统计",
+                      merged["total"] == usage["total"] + 1000
+                      and merged["calls"] == usage["calls"] + 1
+                      and row["total_tokens"] == merged["total"]
+                      and row["api_calls"] == merged["calls"],
+                      f"{usage['total']} → {merged['total']} token"))
+    results.append(ok("累加后阶段明细既留分析又加导师提问",
+                      {s["name"] for s in merged["by_stage"]} == {"转录 ASR", "文本通道", "导师提问"},
+                      " / ".join(s["name"] for s in merged["by_stage"])))
+    results.append(ok("估算次数跨批次累加",
+                      merged["estimated_calls"] == usage["estimated_calls"],
+                      f"{merged['estimated_calls']} 次估算"))
+    again = db.add_usage(probe, QwenClient().usage_summary())
+    results.append(ok("零调用累加直接跳过不改写",
+                      again == {} and db.get_video(probe)["total_tokens"] == merged["total"]))
+    results.append(ok("聚合视图把累加后的用量算进用户口径",
+                      db.token_usage(db.get_user_by_name("alice")["id"])["calls"] == merged["calls"],
+                      f"{db.token_usage(db.get_user_by_name('alice')['id'])['calls']} 次"))
+
     print("\n== 6. 失败任务兜底 ==")
     u = db.get_user_by_name("bob")
     bad = db.create_video(u["id"], "坏文件", "missing.mp4", str(settings.video_dir / "missing.mp4"), 0)
@@ -442,8 +469,8 @@ def main() -> int:
 
     print("\n== 11. 大模型提示词：声明、差量落盘、校验与生效 ==")
     prm.clear_cache()
-    results.append(ok("提示词声明表覆盖 14 块 / 6 组",
-                      len(prm.PROMPT_FIELDS) == 14 and len(prm.PROMPT_GROUPS) == 6,
+    results.append(ok("提示词声明表覆盖 19 块 / 7 组",
+                      len(prm.PROMPT_FIELDS) == 19 and len(prm.PROMPT_GROUPS) == 7,
                       f"{len(prm.PROMPT_FIELDS)} 块 / {len(prm.PROMPT_GROUPS)} 组"))
     results.append(ok("内置默认自带所声明的占位符",
                       not (bad := [f.key for f in prm.PROMPT_FIELDS
@@ -578,6 +605,122 @@ def main() -> int:
     prm.reset_all()
     prm.PROMPTS_FILE.unlink(missing_ok=True)
     prm.clear_cache()
+
+    print("\n== 12. 导师提问：整组重建、作答回写与兜底出题 ==")
+    vid_qa = video_ids["alice"][0]
+    uid_qa = db.get_video(vid_qa)["user_id"]
+    report_qa = json.loads(db.get_evaluation(vid_qa)["payload"])
+    auto_qa = db.get_questions(vid_qa)
+    results.append(ok("分析完成后自动带出 3 道待作答的提问",
+                      len(auto_qa) == 3 and [q["idx"] for q in auto_qa] == [1, 2, 3]
+                      and all(q["status"] == "open" and q["question"].strip() for q in auto_qa),
+                      f"{len(auto_qa)} 条"))
+    written = db.save_questions(vid_qa, uid_qa, ["第一题", "   ", "第二题", "第三题", "第四题"])
+    rows_qa = db.get_questions(vid_qa)
+    results.append(ok("保存提问：空文本跳过、只取前 3 条、idx 从 1 连号",
+                      written == 3 and [q["idx"] for q in rows_qa] == [1, 2, 3]
+                      and [q["question"] for q in rows_qa] == ["第一题", "第二题", "第三题"],
+                      f"{written} 条"))
+    results.append(ok("新提问初始状态是 open 且无作答",
+                      all(q["status"] == "open" and not q["answer"] and not q["ai_comment"]
+                          for q in rows_qa)))
+    results.append(ok("回写作答成功", db.save_qa_answer(vid_qa, 2, "我的作答", "导师点评") is True))
+    answered = db.get_questions(vid_qa)[1]
+    results.append(ok("作答/点评/状态一起落库",
+                      answered["answer"] == "我的作答" and answered["ai_comment"] == "导师点评"
+                      and answered["status"] == "answered"))
+    results.append(ok("序号不存在时回写作答返回 False",
+                      db.save_qa_answer(vid_qa, 9, "x", "y") is False))
+    again = db.save_questions(vid_qa, uid_qa, ["新第一题", "新第二题", "新第三题"])
+    rows_qa = db.get_questions(vid_qa)
+    results.append(ok("重复出题整组重建，不累积旧题也不留旧作答",
+                      again == 3 and len(rows_qa) == 3
+                      and all(q["status"] == "open" and not q["answer"] for q in rows_qa)))
+    db.save_questions(vid_qa, uid_qa, ["问" * 600])
+    results.append(ok("超长提问截断到 500 字",
+                      len(db.get_questions(vid_qa)[0]["question"]) == 500))
+    db.save_questions(vid_qa, uid_qa, ["第一题", "第二题", "第三题"])
+    db.save_qa_answer(vid_qa, 1, "我的作答", "导师点评")
+    db.save_evaluation(db.get_video(vid_qa), report_qa, model="selfcheck")
+    results.append(ok("重新分析（save_evaluation）清空提问与作答", db.get_questions(vid_qa) == []))
+
+    probe_vid = db.create_video(uid_qa, "外键探针", "qa-probe.mp4", "qa-probe.mp4", 1)
+    db.save_questions(probe_vid, uid_qa, ["探针一", "探针二", "探针三"])
+    db.delete_video(probe_vid)
+    with db.get_conn() as conn:
+        left = conn.execute("SELECT COUNT(*) FROM qa_turns WHERE video_id = ?",
+                            (probe_vid,)).fetchone()[0]
+    results.append(ok("删除视频级联清掉导师提问（ON DELETE CASCADE）", left == 0, f"残留 {left} 条"))
+    probe_uid = db.create_user("qa_probe", "pass1234", display_name="探针")
+    db.save_questions(db.create_video(probe_uid, "探针视频", "p.mp4", "p.mp4", 1),
+                      probe_uid, ["探针一", "探针二", "探针三"])
+    db.delete_user(probe_uid)
+    with db.get_conn() as conn:
+        left = conn.execute("SELECT COUNT(*) FROM qa_turns WHERE user_id = ?", (probe_uid,)).fetchone()[0]
+    results.append(ok("删除用户跨两级级联清掉导师提问", left == 0, f"残留 {left} 条"))
+
+    fb = analyze.fallback_questions(report_qa, report_qa.get("topic") or "")
+    results.append(ok("兜底出题永远 3 条且非空", len(fb) == 3 and all(q.strip() for q in fb),
+                      f"{len(fb)} 条"))
+    fb_empty = analyze.fallback_questions({"dimensions": [], "suggestions": []}, "")
+    results.append(ok("报告缺字段时仍 3 条并回退到「本次演讲」",
+                      len(fb_empty) == 3 and all("本次演讲" in q for q in fb_empty)))
+    fb_topic = analyze.fallback_questions({}, "My Topic")
+    results.append(ok("题目写进兜底问题里", len(fb_topic) == 3 and all("My Topic" in q for q in fb_topic)))
+
+    class _QAStub:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.prompts: list[str] = []
+
+        def chat(self, prompt, system="", **kw):
+            self.prompts.append(prompt)
+            return Completion(text=self.text, model="mock", usage=None)
+
+    good = json.dumps({"questions": ["甲题？", " 乙题？ ", "丙题？", "丁题？"]}, ensure_ascii=False)
+    qs = analyze.build_questions(_QAStub(good), rubric, report_qa, "转写", "题目", "2-3 分钟")
+    results.append(ok("模型给足 3 条即采用并清洗顺序、截掉多余",
+                      qs == ["甲题？", "乙题？", "丙题？"], "、".join(qs)))
+    short = analyze.build_questions(_QAStub('{"questions": ["只有一题"]}'), rubric, report_qa,
+                                    "转写", "题目")
+    results.append(ok("模型条数不足整批改用兜底题",
+                      len(short) == 3 and "只有一题" not in short
+                      and all(q.strip() for q in short), "、".join(short)))
+    broken = analyze.build_questions(_QAStub("这里没有 JSON"), rubric, report_qa, "转写", "题目")
+    results.append(ok("模型返回无法解析时仍返回 3 条", len(broken) == 3))
+    spy_q = _QAStub(good)
+    analyze.build_questions(spy_q, rubric, report_qa, "转写正文", "题目", "2-3 分钟")
+    results.append(ok("出题正文带主题、要求与本稿评价结果",
+                      all(s in spy_q.prompts[0] for s in ("题目", "2-3 分钟", "转写正文"))))
+    results.append(ok("出题正文不重复塞关键帧与逐帧测量",
+                      '"frames"' not in spy_q.prompts[0] and '"stamps"' not in spy_q.prompts[0]))
+
+    spy_r = _QAStub(json.dumps({"comments": ["点评甲。", " 点评乙。 "]}, ensure_ascii=False))
+    cm = analyze.review_answers(spy_r, report_qa, [("问题一", "作答一"), ("问题二", "作答二")])
+    results.append(ok("点评按题序返回且与作答等长", cm == ["点评甲。", "点评乙。"], "、".join(cm)))
+    results.append(ok("点评正文带上学生作答",
+                      "问题一" in spy_r.prompts[0] and "作答一" in spy_r.prompts[0]))
+    few = analyze.review_answers(_QAStub('{"comments": ["只有一条"]}'), report_qa,
+                                 [("问题一", "作答一"), ("问题二", "作答二")])
+    results.append(ok("点评条数不符整批回兜底文案",
+                      len(few) == 2 and all(c == analyze.QA_ANSWER_FALLBACK for c in few)))
+    results.append(ok("模型异常时点评仍与作答等长",
+                      len(analyze.review_answers(_QAStub(""), report_qa, [("问题一", "作答一")])) == 1))
+    results.append(ok("无作答时点评返回空表", analyze.review_answers(_QAStub(good), report_qa, []) == []))
+
+    qa_keys = ("qa_system", "qa_context", "qa_schema", "qa_review_context", "qa_review_schema")
+    results.append(ok("导师提问提示词组已声明 5 块", all(k in prm.PROMPT_BY_KEY for k in qa_keys)))
+    results.append(ok("导师提问自成一组且带说明",
+                      any(g[0] == "导师提问" and len(g[2]) == 5 for g in prm.PROMPT_GROUPS)))
+    q_render = prm.render("qa_context", topic="题目", requirements="要求", result='{"total": 1}',
+                          transcript="讲稿全文", schema=prm.get("qa_schema"))
+    results.append(ok("出题块渲染后不残留占位符",
+                      not any(("{" + t + "}") in q_render
+                              for t in ("topic", "requirements", "result", "transcript", "schema"))))
+    r_render = prm.render("qa_review_context", qa="问题一：Q\n学生作答一：A",
+                          schema=prm.get("qa_review_schema"))
+    results.append(ok("点评块渲染后不残留占位符", "{qa}" not in r_render and "{schema}" not in r_render))
+    db.save_questions(vid_qa, uid_qa, ["最终一题", "最终二题", "最终三题"])
 
     print("\n" + "=" * 56)
     passed = sum(1 for r in results if r)

@@ -316,6 +316,42 @@
     {% endfor %}
   </div>
 </section>
+
+<section class="sheet" id="qa" data-reveal="7">
+  <div class="section-title" style="margin-top:0"><h2>导师提问</h2>
+    <span>{% if qa %}{{ qa | length }} 问 · {{ '已作答' if qa_answered else '等待作答' }} · 逐题点评{% else %}本稿尚未出题{% endif %}</span>
+  </div>
+  {% if msg %}<div class="alert info no-print">{{ msg }}</div>{% endif %}
+  {% if not qa %}
+    <p class="dim-text">还没有思考题。生成后导师会针对这份演讲提 3 个问题，你逐条作答，AI 会给出每题两三句话的简评。</p>
+    <form class="inline-form no-print" method="post" action="/videos/{{ video['id'] }}/qa/generate">
+      <button class="btn small" type="submit">生成导师提问</button>
+    </form>
+  {% else %}
+    <form method="post" action="/videos/{{ video['id'] }}/qa/answer">
+      <ol class="qa-list">
+        {% for q in qa %}
+        <li class="qa-item">
+          <div class="qa-no mono">{{ q['idx'] }}</div>
+          <div class="qa-body">
+            <p class="qa-question">{{ q['question'] }}</p>
+            <label class="field">
+              <span class="dim-text">你的作答</span>
+              <textarea name="answer_{{ q['idx'] }}" rows="3"
+                        placeholder="写下你的思考，提交后逐题点评">{{ q['answer'] }}</textarea>
+            </label>
+            {% if q['ai_comment'] %}<p class="qa-comment">{{ q['ai_comment'] }}</p>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      <div class="no-print" style="margin-top:16px">
+        <button class="btn small" type="submit"
+                onclick="return confirm('提交会覆盖此前的作答与点评，继续？')">提交作答</button>
+      </div>
+    </form>
+  {% endif %}
+</section>
 {% endblock %}
 
 {% block script %}

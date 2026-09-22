@@ -205,6 +205,7 @@ def run_analysis(video_id: int, rubric: Rubric = DEFAULT_RUBRIC) -> dict:
         narr = analyze.build_narrative(client, rubric, agg, transcript, video["topic"],
                                        history_note, note=notes)
     usage = _flush_usage(client, video_id)
+    client.reset_usage()
     if usage["calls"]:
         tail = f"（其中 {usage['estimated_calls']} 次为估算）" if usage["estimated_calls"] else ""
         agg.qc.append(f"本次分析共发起在线评审请求 {usage['calls']} 次，"
@@ -227,6 +228,20 @@ def run_analysis(video_id: int, rubric: Rubric = DEFAULT_RUBRIC) -> dict:
                     channels=[{"channel": c["channel"], "model": c.get("model", ""),
                                "keys": list(c.get("scores", {}).keys())} for c in channels],
                     qc=agg.qc, analyzed_at=db.now())
+    try:
+        db.set_progress(video_id, "analyzing", "生成导师提问", 99)
+        if real:
+            client.mark("导师提问")
+            questions = analyze.build_questions(client, rubric, report, transcript,
+                                                video["topic"], video["requirements"],
+                                                note=notes)
+        else:
+            questions = analyze.fallback_questions(report, video["topic"])
+        db.save_questions(video_id, video["user_id"], questions)
+    except Exception:  # noqa: BLE001 - 出题失败不影响评价报告完成
+        pass
+    finally:
+        db.add_usage(video_id, client.usage_summary())
     db.set_progress(video_id, "done", "分析完成", 100)
     return report
 

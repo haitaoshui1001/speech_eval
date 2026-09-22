@@ -225,6 +225,69 @@ PROMPT_GROUPS: tuple[tuple[str, str, tuple[PromptField, ...]], ...] = (
             "键名改了又没改模板 → 该栏空白",
             must_contain=('"advantages"', '"disadvantages"', '"suggestions"', '"summary"')),
     )),
+    ("导师提问", "评价完成后由导师针对本稿出 3 道思考题，学生作答后再逐题点评。", (
+        PromptField("qa_system", "导师提问 · 系统提示词",
+            "你是大学英语演讲课的导师，手上有学生的演讲稿和一份已完成的评价报告。你会先后做两件事。"
+            "一是出 3 道思考题：紧扣演讲主题与本稿内容，覆盖其薄弱维度，不得出题与稿件无关的通用题；"
+            "不出记忆性题目，要学生解释自己为什么这样讲、怎么改。"
+            "二是在学生作答之后逐题点评：只针对他写下的答案，两三句话讲清哪里站得住、哪里还欠一层，"
+            "不要复述学生原话。两次回答都只输出 JSON，不要任何解释文字。",
+            "出题与点评两次请求共用的 system 角色：既管「题只出自这篇稿子」，也管「点评只两三句话」。",
+            "保存后下一次出题生效"),
+        PromptField("qa_context", "导师提问 · 输入材料段",
+            _join([
+                "演讲主题：",
+                "{topic}",
+                "",
+                "演讲要求：",
+                "{requirements}",
+                "",
+                "本次评价结果（JSON）：",
+                "{result}",
+                "",
+                "演讲稿全文/转写节选：",
+                "<<<",
+                "{transcript}",
+                ">>>",
+                "",
+                "请输出 JSON：",
+                "{schema}",
+            ]),
+            "{topic} = 演讲主题，{requirements} = 老师要求，{result} = 已定的评价结果，"
+            "{transcript} = 稿件全文（超长会被截断），{schema} = 下面的出题结构。",
+            "五个占位符缺一不可；删掉 {result} 模型就看不到薄弱维度，题目会飘成通用题",
+            tokens=("topic", "requirements", "result", "transcript", "schema"), strict_braces=True),
+        PromptField("qa_schema", "导师提问 · 输出结构",
+            _join([
+                "{",
+                '  "questions": ["共 3 条，每条一道中文思考题，不超过 80 字"]',
+                "}",
+            ]),
+            "这份 JSON 骨架决定报告页「导师提问」能不能显示出 3 道题，改字段名要连同出题代码一起改。",
+            "键名改了 → 出题失败并回退到内置兜底题",
+            must_contain=('"questions"',)),
+        PromptField("qa_review_context", "导师点评 · 输入材料段",
+            _join([
+                "以下是一位学生对导师提问的作答：",
+                "{qa}",
+                "",
+                "请按题序输出 JSON：",
+                "{schema}",
+            ]),
+            "{qa} = 编号后的「问题 / 学生作答」文本块（三题一次送评），{schema} = 下面的点评结构。",
+            "删掉 {qa} 模型读不到作答，只能凭空客套",
+            tokens=("qa", "schema"), strict_braces=True),
+        PromptField("qa_review_schema", "导师点评 · 输出结构",
+            _join([
+                "{",
+                '  "comments": ["共 3 条，与问题同序，每条两三句话（不超过 90 字），'
+                '先肯定再指出不足，不要复述学生原话"]',
+                "}",
+            ]),
+            "点评按题序返回，条数与题目数不一致时整批回退到兜底文案。",
+            "键名改了 → 点评失败并回退到内置兜底文案",
+            must_contain=('"comments"',)),
+    )),
 )
 
 PROMPT_FIELDS: tuple[PromptField, ...] = tuple(f for _, _, fs in PROMPT_GROUPS for f in fs)

@@ -1078,3 +1078,19 @@ a:focus-visible, button:focus-visible, summary:focus-visible,
   outline: 2px solid var(--seal);
   outline-offset: 2px;
 }
+
+/* ------------------------------------------------------------------ 导师提问 */
+.qa-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+.qa-item {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; align-items: start;
+}
+.qa-no {
+  border: 1px solid var(--rule-2); text-align: center; padding: 2px 0;
+  font-size: 13px; color: var(--ink-3);
+}
+.qa-body { display: grid; gap: 9px; min-width: 0; }
+.qa-question { margin: 0; font-size: 15.5px; line-height: 1.65; }
+.qa-comment {
+  margin: 0; padding: 4px 0 4px 13px; border-left: 3px solid var(--teal);
+  font-size: 15px; line-height: 1.7; color: var(--ink-2);
+}

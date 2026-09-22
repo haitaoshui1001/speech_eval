@@ -22,9 +22,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import (accounts, config, db, face as face_mod, pipeline, prompts,
-               qwen)
-from .analyze import channel_weights
+from . import (accounts, config, db, face as face_mod, pipeline,
+               prompts, qwen)
+from .analyze import (QA_ANSWER_FALLBACK, build_questions, channel_weights,
+                      fallback_questions, review_answers)
 from .config import settings
 from .rubric import rubric as DEFAULT_RUBRIC
 from .security import (make_session_token, password_ok, read_session_token,
@@ -338,8 +339,65 @@ def video_status(video_id: int, request: Request):
                          "running": pipeline.is_running(video_id)})
 
 
+def _qa_redirect(video_id: int, msg: str = "") -> RedirectResponse:
+    tail = "?msg=" + quote(msg) if msg else ""
+    return RedirectResponse(f"/videos/{video_id}{tail}#qa", status_code=303)
+
+
+@app.post("/videos/{video_id}/qa/generate")
+def qa_generate(video_id: int, request: Request):
+    _, video = owned_video(request, video_id)
+    if video["status"] != "done":
+        return _qa_redirect(video_id, "评价完成后才能生成导师提问")
+    if db.get_questions(video_id):
+        return _qa_redirect(video_id, "导师提问已存在")
+    try:
+        ev = db.get_evaluation(video_id)
+        report = json.loads(ev["payload"] or "{}") if ev else {}
+        if settings.real_mode:
+            client = qwen.QwenClient().mark("导师提问")
+            try:
+                questions = build_questions(client, DEFAULT_RUBRIC, report,
+                                            video["transcript"], video["topic"],
+                                            video["requirements"])
+            finally:
+                db.add_usage(video_id, client.usage_summary())
+        else:
+            questions = fallback_questions(report, video["topic"])
+        db.save_questions(video_id, video["user_id"], questions)
+    except Exception:  # noqa: BLE001 - 出题失败只回执，不抛错页
+        return _qa_redirect(video_id, "生成导师提问失败，请稍后重试")
+    return _qa_redirect(video_id)
+
+
+@app.post("/videos/{video_id}/qa/answer")
+async def qa_answer(video_id: int, request: Request):
+    _, video = owned_video(request, video_id)
+    form = await request.form()
+    questions = db.get_questions(video_id)
+    if not questions:
+        return _qa_redirect(video_id, "还没有导师提问")
+    answers = {q["idx"]: str(form.get(f"answer_{q['idx']}") or "").strip() for q in questions}
+    if any(not answers[q["idx"]] for q in questions):
+        return _qa_redirect(video_id, "请把 3 个问题都回答后再提交")
+    pairs = [(q["question"], answers[q["idx"]]) for q in questions]
+    if settings.real_mode:
+        ev = db.get_evaluation(video_id)
+        report = json.loads(ev["payload"] or "{}") if ev else {}
+        client = qwen.QwenClient().mark("导师点评")
+        try:
+            comments = review_answers(client, report, pairs, note=[])
+        finally:
+            db.add_usage(video_id, client.usage_summary())
+    else:
+        comments = [QA_ANSWER_FALLBACK] * len(pairs)
+    for q, comment in zip(questions, comments):
+        db.save_qa_answer(video_id, q["idx"], answers[q["idx"]], comment)
+    return _qa_redirect(video_id, "已收到你的作答，导师点评已生成")
+
+
 @app.get("/videos/{video_id}", response_class=HTMLResponse)
-def video_page(request: Request, video_id: int):
+def video_page(request: Request, video_id: int, msg: str = ""):
     user, video = owned_video(request, video_id)
     if video["status"] != "done":
         return render(request, "progress.html", nav="dashboard", video=video,
@@ -361,10 +419,12 @@ def video_page(request: Request, video_id: int):
         prev_dims = db.dims_for_video(history[rank - 2]["id"]) if prev else {}
         prev = {"video": history[rank - 2], "dims": prev_dims}
     segments = json.loads(video["segments"] or "[]")
+    qa = db.get_questions(video_id)
     return render(request, "report.html", nav="dashboard", video=video, report=report, dims=dims,
                   frames=frames, film=film, face=face, ev=ev, prev=prev, rank=rank,
                   total_runs=len(history),
                   segments=segments, is_owner=user["id"] == video["user_id"],
+                  qa=qa, qa_answered=any(q["status"] == "answered" for q in qa), msg=msg,
                   user_rows=db.list_user_videos(video["user_id"], limit=PAGE_SIZE))
 
 

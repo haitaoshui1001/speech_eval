@@ -636,6 +636,104 @@ def _clean_suggestions(raw, agg: dict) -> list[dict]:
     return out[:8]
 
 
+# ------------------------------------------------------------------ 导师提问
+QA_ANSWER_FALLBACK = "已收到你的作答，建议结合报告中的改进建议再补充一层论证。"
+_QA_DROP_KEYS = ("frames", "stamps", "face", "transcript_excerpt")
+
+
+def _ratio_key(d: dict) -> float:
+    try:
+        return float(d.get("ratio") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def fallback_questions(report: dict, topic: str) -> list[str]:
+    """不依赖模型的兜底出题：改进建议 + 最弱维度拼 3 道思考题，永远返回 3 条。"""
+    name = (topic or "").strip() or "本次演讲"
+    dims = [d for d in (report.get("dimensions") or []) if isinstance(d, dict)]
+    weak = [str(d.get("name") or "").strip() for d in sorted(dims, key=_ratio_key)[:2]]
+    weak = [d for d in weak if d]
+    out: list[str] = []
+    for s in [x for x in (report.get("suggestions") or []) if isinstance(x, dict)][:2]:
+        action = str(s.get("action") or "").strip()
+        dim = str(s.get("dimension") or "").strip()
+        if action:
+            out.append(f"关于{('「' + dim + '」') if dim else '这篇稿件'}，建议里让你「{action[:60]}」，"
+                       f"你在《{name}》里打算改哪一句？为什么这样改？")
+        elif dim:
+            out.append(f"你在「{dim}」这一项还有差距，重讲《{name}》时你会怎么补强？请举一处具体改法。")
+    for dim in weak:
+        out.append(f"「{dim}」是这篇稿子相对最薄弱的一项，讲《{name}》时你哪一处最没底？打算怎么练？")
+    out.append(f"如果只能改《{name}》的三段内容里的一个词，你会改哪个？请说出你的取舍理由。")
+    seen: list[str] = []
+    for q in out:
+        q = q.strip()[:160]
+        if q and q not in seen:
+            seen.append(q)
+    pad = [
+        f"关于《{name}》，你最想让听众记住哪一句？这句现在够不够有说服力？",
+        f"《{name}》的开头三句，重讲一遍你会换掉哪一句？为什么？",
+        f"讲《{name}》时你自己觉得最像在读稿的是哪一段？打算怎么处理？",
+    ]
+    for q in pad:
+        if len(seen) >= 3:
+            break
+        seen.append(q)
+    return seen[:3]
+
+
+def build_questions(client: QwenClient, rubric: Rubric, report: dict, transcript: str,
+                    topic: str, requirements: str = "",
+                    note: list[str] | None = None) -> list[str]:
+    """评价完成后出 3 道针对本稿的思考题；模型不给足 3 条就整批改用兜底题。"""
+    prompt = prompts.render(
+        "qa_context",
+        topic=(topic or "").strip() or "本次演讲",
+        requirements=(requirements or "").strip() or "（未填写）",
+        result=json.dumps({k: v for k, v in report.items() if k not in _QA_DROP_KEYS},
+                          ensure_ascii=False, indent=1),
+        transcript=(transcript or "")[:4000],
+        schema=prompts.get("qa_schema"))
+    try:
+        comp = client.chat(prompt, system=prompts.get("qa_system"), json_mode=True,
+                           temperature=0.5, note=note)
+        data = parse_json_block(comp.text or "")
+        got = [str(q).strip()[:300] for q in (data.get("questions") or []) if str(q).strip()] \
+            if isinstance(data, dict) else []
+    except Exception:  # noqa: BLE001 - 出题失败不应影响报告，退回本地题目
+        got = []
+    if len(got) < 3:
+        got = fallback_questions(report, topic)
+    return got[:3]
+
+
+def review_answers(client: QwenClient, report: dict, pairs: list[tuple[str, str]],
+                   note: list[str] | None = None) -> list[str]:
+    """三题一次送评，按题序返回点评；条数对不上就整批回兜底文案。"""
+    if not pairs:
+        return []
+    fallback = [QA_ANSWER_FALLBACK] * len(pairs)
+    lines: list[str] = []
+    focus = str(report.get("next_focus") or "").strip()
+    if focus:
+        lines.append(f"本稿下一步重点：{focus[:200]}")
+    for i, (question, answer) in enumerate(pairs, 1):
+        lines.append(f"问题{i}：{question}")
+        lines.append(f"学生作答{i}：{(answer or '').strip() or '（未作答）'}")
+    prompt = prompts.render("qa_review_context", qa="\n".join(lines),
+                            schema=prompts.get("qa_review_schema"))
+    try:
+        comp = client.chat(prompt, system=prompts.get("qa_system"), json_mode=True,
+                           temperature=0.2, note=note)
+        data = parse_json_block(comp.text or "")
+        got = [str(c).strip()[:300] for c in (data.get("comments") or []) if str(c).strip()] \
+            if isinstance(data, dict) else []
+    except Exception:  # noqa: BLE001 - 点评失败保留作答，只换文案
+        return fallback
+    return got if len(got) == len(pairs) else fallback
+
+
 # ------------------------------------------------------------------ 最终报告
 def build_report(rubric: Rubric, agg: Aggregated, narr: dict, channels: list[dict],
                  timing: TimingCheck, transcript: str, engine: str, model: str) -> dict:

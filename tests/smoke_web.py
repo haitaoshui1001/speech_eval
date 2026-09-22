@@ -111,7 +111,7 @@ def env_form(overrides: dict | None = None, uncheck: tuple[str, ...] = ()) -> di
 
 
 def prompt_form(overrides: dict | None = None) -> dict:
-    """按页面提交规则拼一份提示词表单：整份 14 块一起提交，未改的块回填当前生效文本。"""
+    """按页面提交规则拼一份提示词表单：整份 19 块一起提交，未改的块回填当前生效文本。"""
     form = {f.key: prm.get(f.key) for f in prm.PROMPT_FIELDS}
     form.update(overrides or {})
     return form
@@ -291,6 +291,36 @@ def main() -> int:
         check(client.get(f"/videos/{v1}/asset/..%2f..%2fapp%2fmain.py").status_code in (400, 404),
               "资源名穿越被拒")
         check(client.get(f"/videos/{v1}/asset/nope.txt").status_code in (400, 404), "非法资源名被拒")
+
+        # ------------------------------------------------------------ 导师提问
+        qa_body = page(client, f"/videos/{v1}", "导师提问", 'name="answer_1"',
+                       'name="answer_2"', 'name="answer_3"', 'id="qa"',
+                       absent=("生成导师提问",), label="分析完成后报告页直接展示 3 道待作答题")
+        check("等待作答" in qa_body, "未作答时区块标注等待作答")
+        check('class="qa-list"' in qa_body and qa_body.count('class="qa-item"') == 3,
+              "列表按题序渲染 3 条")
+        dup = client.post(f"/videos/{v1}/qa/generate", follow_redirects=False)
+        check(dup.status_code == 303 and "msg=" in dup.headers["location"]
+              and "已存在" in unquote(dup.headers["location"]),
+              "重复生成会给出已存在回执", dup.headers.get("location", ""))
+        miss = client.post(f"/videos/{v1}/qa/answer",
+                           data={"answer_1": "只答第一题。", "answer_2": "", "answer_3": "第三题。"},
+                           follow_redirects=False)
+        check(miss.status_code == 303 and "都回答" in unquote(miss.headers["location"]),
+              "缺答时不入库并给出提示", miss.headers.get("location", ""))
+        check(all(not q["answer"] for q in db.get_questions(v1)), "缺答提交未污染已有作答")
+        full = client.post(f"/videos/{v1}/qa/answer",
+                           data={"answer_1": "第一题作答。", "answer_2": "第二题作答。",
+                                 "answer_3": "第三题作答。"},
+                           follow_redirects=False)
+        check(full.status_code == 303 and "点评" in unquote(full.headers["location"]),
+              "齐答三题后跳回报告页", full.headers.get("location", ""))
+        answered = page(client, f"/videos/{v1}", "已作答", 'class="qa-comment"',
+                        "第一题作答。", label="提交后报告页回填作答并展示简评")
+        check(answered.count('class="qa-comment"') == 3, "每题都渲染出一条简评")
+        saved = db.get_questions(v1)
+        check(len(saved) == 3 and all(q["status"] == "answered" and q["ai_comment"] for q in saved),
+              "作答与简评一并入库", str([q["status"] for q in saved]))
 
         # ------------------------------------------------------------ 对比页
         page(client, "/compare", "历次对比", "维度轮廓", "逐项分值对照", "变化量", "总分趋势",
@@ -564,6 +594,11 @@ def main() -> int:
         check(client.get(f"/videos/{v2}/status", follow_redirects=False).status_code == 403, "他人状态不可读")
         check(client.get("/admin", follow_redirects=False).status_code == 403, "普通用户访问后台 403")
         check(client.post(f"/videos/{v2}/delete", follow_redirects=False).status_code == 403, "他人视频不可删")
+        check(client.post(f"/videos/{v2}/qa/generate", follow_redirects=False).status_code == 403,
+              "他人视频不可生成提问")
+        check(client.post(f"/videos/{v2}/qa/answer", data={"answer_1": "x"},
+                          follow_redirects=False).status_code == 403,
+              "他人视频不可提交作答")
         check(client.post("/admin/users/1/delete", follow_redirects=False).status_code == 403,
               "普通用户不能删账号")
         bob_id = db.get_user_by_name("bob")["id"]
@@ -577,6 +612,10 @@ def main() -> int:
         check(tamper.get("/dashboard", follow_redirects=False).status_code == 303, "空 Cookie 视为未登录")
         tamper.cookies.set("sid", "eyJpZCI6MSwicm9sZSI6ImFkbWluIn0.forged")
         check(tamper.get("/admin", follow_redirects=False).status_code == 303, "伪造 Cookie 被拒")
+        check(tamper.post(f"/videos/{v1}/qa/generate", follow_redirects=False).status_code == 303
+              and tamper.post(f"/videos/{v1}/qa/generate", follow_redirects=False
+                              ).headers["location"].startswith("/login"),
+              "未登录点击生成跳回登录页")
         # 角色存在库里，Cookie 里写 admin 也没用
         forged = make_session_token(bob_id, "admin")
         tamper.cookies.set("sid", forged)
@@ -728,8 +767,9 @@ def main() -> int:
         # ------------------------------------------------ 大模型提示词（与 .env 分开的第二条链路）
         check(not prm.PROMPTS_FILE.exists(), "保存 .env 表单不会写提示词文件")
         env_snapshot = cfg.read_env_file()
-        body = page(adm, "/settings", "提示词配置", "14 块 · 0 块已自定义", "保存提示词",
+        body = page(adm, "/settings", "提示词配置", "19 块 · 0 块已自定义", "保存提示词",
                     "全部恢复内置默认", 'name="common_rules"', 'name="narrative_schema"',
+                    'name="qa_context"', 'name="qa_review_schema"',
                     "<textarea", "内置默认", label="设置页渲染提示词分区")
         check("文件尚不存在" in body, "无覆盖文件时页面说明全部使用内置默认")
         check(prm.PROMPTS_FILE.exists() is False, "只打开页面不会创建提示词文件")
@@ -752,7 +792,7 @@ def main() -> int:
         check(list(disk["prompts"]) == ["common_rules"], "提示词文件只落差异块", str(list(disk["prompts"])))
         check(prm.get("common_rules").startswith("自定义硬性规则") and prm.get("system") == prm.DEFAULTS["system"],
               "保存后分析链路立即读到新提示词")
-        page(adm, "/settings", "14 块 · 1 块已自定义", "管理员自定义", "_websmoke.prompts.json",
+        page(adm, "/settings", "19 块 · 1 块已自定义", "管理员自定义", "_websmoke.prompts.json",
              label="重开页面显示自定义状态")
         check(cfg.read_env_file() == env_snapshot, "保存提示词不会动 .env 文件")
 
@@ -761,7 +801,7 @@ def main() -> int:
               "一键恢复内置默认", f"{rs.status_code} {unquote(rs.headers.get('location', ''))}")
         check(prm.get("common_rules") == prm.DEFAULTS["common_rules"] and prm.custom_count() == 0,
               "恢复后回到内置默认且计数归零")
-        page(adm, rs.headers["location"], "已恢复", "14 块 · 0 块已自定义", label="恢复结果提示可见")
+        page(adm, rs.headers["location"], "已恢复", "19 块 · 0 块已自定义", label="恢复结果提示可见")
 
         check(client.post("/settings/prompts", data=prompt_form(), follow_redirects=False).status_code == 403,
               "普通用户不能保存提示词")

@@ -104,11 +104,25 @@ CREATE TABLE IF NOT EXISTS issues (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS qa_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL DEFAULT '',
+    ai_comment TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT '',
+    answered_at TEXT NOT NULL DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS idx_videos_user ON videos(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_eval_video ON evaluations(video_id);
 CREATE INDEX IF NOT EXISTS idx_dim_eval ON dimension_scores(evaluation_id);
 CREATE INDEX IF NOT EXISTS idx_dim_user ON dimension_scores(user_id, dim_key);
 CREATE INDEX IF NOT EXISTS idx_issue_user ON issues(user_id, signature);
+CREATE INDEX IF NOT EXISTS idx_qa_video ON qa_turns(video_id, idx);
 """
 
 
@@ -464,6 +478,56 @@ def admin_dim_stats(topic: str = "") -> dict:
             "by_user": sorted(people.values(), key=lambda x: -x["n"]), "samples": samples}
 
 
+def _merge_usage_axis(prev, new) -> list[dict]:
+    """合并两份 by_stage / by_model 明细，按 name 相加后按 token 倒序。"""
+    table: dict[str, dict] = {}
+    for item in list(prev or []) + list(new or []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "—")
+        row = table.setdefault(name, {"name": name, "calls": 0, "prompt": 0,
+                                      "completion": 0, "total": 0, "estimated": 0})
+        for k in ("calls", "prompt", "completion", "total", "estimated"):
+            row[k] += int(item.get(k) or 0)
+    return sorted(table.values(), key=lambda x: -x["total"])
+
+
+def add_usage(video_id: int, usage: dict) -> dict:
+    """把一次按需调用（导师出题、作答点评）的用量累加进视频行，返回合并结果。
+
+    pipeline._flush_usage 是覆盖写：它汇总的是贯穿整条流水线的那个 client 的全部记录，
+    所以只在分析阶段用。分析完成后另起 client 调模型时只能走这里做增量合并，
+    否则会把分析阶段已经记下的 token 统计整段抹掉。
+    """
+    calls = int((usage or {}).get("calls") or 0)
+    if not calls:
+        return {}
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT prompt_tokens, completion_tokens, total_tokens, api_calls, token_detail "
+            "FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if row is None:
+        return {}
+    try:
+        prev = json.loads(row["token_detail"] or "{}")
+    except json.JSONDecodeError:
+        prev = {}
+    if not isinstance(prev, dict):
+        prev = {}
+    merged = {
+        "calls": int(row["api_calls"] or 0) + calls,
+        "prompt": int(row["prompt_tokens"] or 0) + int(usage.get("prompt") or 0),
+        "completion": int(row["completion_tokens"] or 0) + int(usage.get("completion") or 0),
+        "total": int(row["total_tokens"] or 0) + int(usage.get("total") or 0),
+        "estimated_calls": int(prev.get("estimated_calls") or 0) + int(usage.get("estimated_calls") or 0),
+        "by_stage": _merge_usage_axis(prev.get("by_stage"), usage.get("by_stage")),
+        "by_model": _merge_usage_axis(prev.get("by_model"), usage.get("by_model")),
+    }
+    update_video(video_id, prompt_tokens=merged["prompt"], completion_tokens=merged["completion"],
+                 total_tokens=merged["total"], api_calls=merged["calls"], token_detail=merged)
+    return merged
+
+
 def token_usage(user_id: int | None = None, per_video: int = 0) -> dict:
     """token 用量汇总：user_id 为空时统计全站。
 
@@ -551,6 +615,7 @@ def save_evaluation(video: sqlite3.Row, report: dict, model: str) -> int:
         conn.execute("DELETE FROM evaluations WHERE video_id = ?", (video["id"],))
         conn.execute("DELETE FROM dimension_scores WHERE video_id = ?", (video["id"],))
         conn.execute("DELETE FROM issues WHERE video_id = ?", (video["id"],))
+        conn.execute("DELETE FROM qa_turns WHERE video_id = ?", (video["id"],))
         cur = conn.execute(
             "INSERT INTO evaluations(video_id, user_id, rubric_version, total, max_total, band, "
             "confidence, advantages, disadvantages, suggestions, summary, next_focus, payload, model, created_at) "
@@ -640,3 +705,40 @@ def user_best_worst(user_id: int) -> tuple[dict, dict]:
     if not data:
         return {}, {}
     return data[-1], data[0]
+
+
+# ---------------- 导师提问 ----------------
+def save_questions(video_id: int, user_id: int | None, questions: list[str]) -> int:
+    """整组重建提问：空文本跳过、只保留前 3 条，重新出题不累积，旧作答随之作废。"""
+    cleaned: list[str] = []
+    for text in questions:
+        q = (text or "").strip()[:500]
+        if not q:
+            continue
+        cleaned.append(q)
+        if len(cleaned) >= 3:
+            break
+    with get_conn() as conn:
+        conn.execute("DELETE FROM qa_turns WHERE video_id = ?", (video_id,))
+        for i, q in enumerate(cleaned, 1):
+            conn.execute(
+                "INSERT INTO qa_turns(video_id, user_id, idx, question, created_at) VALUES (?,?,?,?,?)",
+                (video_id, user_id, i, q, now()))
+        return len(cleaned)
+
+
+def get_questions(video_id: int) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM qa_turns WHERE video_id = ? ORDER BY idx ASC",
+                            (video_id,)).fetchall()
+    return [{"idx": r["idx"], "question": r["question"], "answer": r["answer"],
+             "ai_comment": r["ai_comment"], "status": r["status"]} for r in rows]
+
+
+def save_qa_answer(video_id: int, idx: int, answer: str, ai_comment: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE qa_turns SET answer = ?, ai_comment = ?, status = 'answered', answered_at = ? "
+            "WHERE video_id = ? AND idx = ?",
+            (answer, ai_comment, now(), video_id, idx))
+        return cur.rowcount > 0
