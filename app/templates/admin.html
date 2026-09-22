@@ -1,0 +1,476 @@
+{% extends "base.html" %}
+{% block title %}管理后台 · 演讲辅助评估系统{% endblock %}
+{% block body %}
+{% set lead = 1 if (msg or error) else 0 %}
+{% if msg %}<section class="sheet" data-reveal="1"><div class="alert {{ 'ok' if ok_msg else '' }}">{{ msg }}</div></section>{% endif %}
+{% if error %}<section class="sheet" data-reveal="1"><div class="alert">{{ error }}</div></section>{% endif %}
+
+<section class="sheet" data-reveal="{{ [lead + 1, 7]|min }}">
+  <div class="kicker">Admin · 全站概览</div>
+  <div class="section-title" style="margin-top:0">
+    <h2>管理后台</h2>
+    <span>登录为 {{ admin_username }} · 可见全部用户的视频与评价</span>
+  </div>
+
+  <div class="cards" style="margin-top:18px">
+    <div class="panel">
+      <h3>已开通账号</h3>
+      <div class="score-big">{{ stats['users'] }}<s class="score-max">人</s></div>
+      <p class="dim-text" style="margin:6px 0 0;font-size:13.5px">不含管理员账号</p>
+    </div>
+    <div class="panel">
+      <h3>视频 / 已分析</h3>
+      <div class="score-big">{{ stats['videos'] }}<s class="score-max">/{{ stats['done'] }} 完成</s></div>
+      <p class="dim-text" style="margin:6px 0 0;font-size:13.5px">
+        {% if stats['running'] %}<span class="tag tag-blue">{{ stats['running'] }} 个任务进行中</span>
+        {% else %}当前无进行中任务{% endif %}</p>
+    </div>
+    <div class="panel">
+      <h3>全站平均总分</h3>
+      <div class="score-big">{{ stats['avg'] if stats['avg'] is not none else '—' }}<s class="score-max">/{{ rubric.total | g }}</s></div>
+      <p class="dim-text" style="margin:6px 0 0;font-size:13.5px">近 7 天新增 {{ stats['recent'] }} 个视频</p>
+    </div>
+    <div class="panel">
+      <h3>用量统计</h3>
+      <div class="score-big">{{ site_usage['total'] | n }}<s class="score-max">token</s></div>
+      <p class="dim-text" style="margin:6px 0 0;font-size:13.5px">
+        {% if site_usage['calls'] %}{{ site_usage['analyzed'] }} 次分析 · {{ site_usage['calls'] }} 调用 ·
+        均 {{ site_usage['avg_per_video'] | n }}/次
+        {%- if site_usage['estimated_calls'] %} · 含 {{ site_usage['estimated_calls'] }} 次估算{% endif %}
+        {% else %}尚无调用记录{% endif %}</p>
+    </div>
+    <div class="panel seal">
+      <h3>最弱三项</h3>
+      {% if worst %}
+      <ol style="margin:0;padding-left:1.3em">
+        {% for w in worst %}
+        <li style="font-size:15.5px;margin-bottom:7px">
+          <b>{{ w['name'] }}</b>
+          <span class="mono dim-text" style="font-size:12px">
+            均分 {{ w['avg_score'] | g }}/{{ w['max_score'] | g }} · {{ '%.0f' % ((w['avg_score'] / w['max_score'] * 100) if w['max_score'] else 0) }}%</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}<p class="dim-text" style="margin:0">尚无评价数据</p>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="sheet" data-reveal="{{ [lead + 2, 7]|min }}">
+  <div class="section-title">
+    <h2>维度均分</h2>
+    <span>{{ dstat['topic'] or '全部主题' }} · {{ dstat['samples'] }} 条视频 · 先按主题筛，再按人摊开</span>
+  </div>
+  <form method="get" action="/admin"
+        style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 18px">
+    <div class="field" style="min-width:min(320px,100%);flex:1">
+      <label for="topic">按主题筛选</label>
+      <select id="topic" name="topic">
+        <option value="">全部主题 · {{ dstat['topics'] | sum(attribute='n') }} 条视频</option>
+        {% for t in dstat['topics'] %}
+        <option value="{{ t['topic'] }}" {{ 'selected' if dstat['topic'] == t['topic'] }}>
+          {{ t['topic'] }} · {{ t['n'] }} 条
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn small" type="submit">筛选</button>
+    {% if dstat['topic'] %}<a class="btn small ghost" href="/admin">清除筛选</a>{% endif %}
+  </form>
+  {% if dstat['by_dim'] %}
+  <div class="table-wrap" style="--table-min:640px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th style="width:44px" class="num">#</th>
+        <th>维度</th>
+        <th class="num">样本</th>
+        <th class="num">均分</th>
+        <th class="num">满分</th>
+        <th class="num">得分率</th>
+        <th class="bar-cell">分布</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in dstat['by_dim'] %}
+      {% set ratio = (d['avg_score'] / d['max_score']) if d['max_score'] else 0 %}
+      <tr>
+        <td class="num dim-text">{{ loop.index }}</td>
+        <td><b>{{ d['name'] }}</b> <span class="dim-en mono">{{ d['dim_key'] }}</span></td>
+        <td class="num dim-text">{{ d['n'] }}</td>
+        <td class="num"><b>{{ d['avg_score'] | g }}</b></td>
+        <td class="num dim-text">{{ d['max_score'] | g }}</td>
+        <td class="num {% if ratio < 0.6 %}delta-down{% elif ratio >= 0.8 %}delta-up{% endif %}">{{ '%.0f' % (ratio * 100) }}%</td>
+        <td class="bar-cell">
+          <div class="meter {{ 'ok' if ratio >= 0.8 else ('warn' if ratio >= 0.6 else 'bad') }}">
+            <i style="width: {{ [100, (ratio * 100) | round | int] | min }}%"></i>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if dstat['by_user'] | length >= 2 %}
+  <p class="dim-text" style="margin:18px 0 8px;font-size:13px">
+    <b>按人拆开</b> · 同一维度在不同主题、不同人身上不是同一条尺子，混在一起看均值会掩盖个体差异
+  </p>
+  <div class="table-wrap pin-first" style="--table-min:920px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th>用户</th>
+        <th class="num">视频</th>
+        <th class="num">平均总分</th>
+        {% for d in dstat['by_dim'] %}<th class="num">{{ d['name'] }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in dstat['by_user'] %}
+      <tr>
+        <td><b>{{ p['who'] }}</b> <span class="mono dim-text" style="font-size:11.5px">{{ p['username'] }}</span></td>
+        <td class="num dim-text">{{ p['n'] }}</td>
+        <td class="num"><b>{{ p['avg_total'] if p['avg_total'] is not none else '—' }}</b></td>
+        {% for d in dstat['by_dim'] %}
+        {% set cell = p['dims'].get(d['dim_key']) %}
+        {% set cr = (cell['avg'] / cell['max']) if cell and cell['max'] else 0 %}
+        <td class="num {% if not cell %}dim-text{% elif cr < 0.6 %}delta-down{% elif cr >= 0.8 %}delta-up{% endif %}">
+          {{ cell['avg'] | g if cell else '—' }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="dim-text">{% if dstat['topic'] %}该主题下还没有评分记录，换个主题或清除筛选试试。{% else %}还没有任何评分记录。用户完成第一次分析后这里就会有数据。{% endif %}</p>
+  {% endif %}
+</section>
+
+<section class="sheet" data-reveal="{{ [lead + 3, 7]|min }}">
+  <div class="section-title">
+    <h2>全部视频</h2>
+    <span>{{ videos | length }} 条 · 倒序</span>
+  </div>
+  {% if videos %}
+  <div class="table-wrap pin-first" style="--table-min:860px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th class="num" style="width:56px">ID</th>
+        <th>演讲 / 用户</th>
+        <th>状态</th>
+        <th class="num">时长</th>
+        <th class="num">大小</th>
+        <th class="num">上传时间</th>
+        <th class="num">总分</th>
+        <th style="width:150px">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in videos %}
+      <tr>
+        <td class="num dim-text mono">{{ v['id'] }}</td>
+        <td>
+          <a href="/videos/{{ v['id'] }}"><b>{{ v['title'] }}</b></a>
+          {% if v['topic'] %}<div class="dim-en">{{ v['topic'] }}</div>{% endif %}
+          <div class="mono" style="font-size:11.5px;color:var(--ink-3)">
+            {{ v['display_name'] or v['username'] }} · @{{ v['username'] }}</div>
+        </td>
+        <td>
+          {% if v['status'] == 'done' %}<span class="tag tag-olive">已完成</span>
+          {% elif v['status'] == 'failed' %}<span class="tag tag-seal">失败</span>
+          {% elif v['status'] == 'uploaded' %}<span class="tag">待分析</span>
+          {% else %}<span class="tag tag-blue"><span class="spinner"></span> 分析中</span>{% endif %}
+          {% if v['status'] == 'failed' and v['error'] %}
+            <div class="mono" style="font-size:11px;color:var(--seal);max-width:26ch;overflow:hidden;text-overflow:ellipsis"
+                 title="{{ v['error'] }}">{{ v['error'][:70] }}</div>
+          {% elif v['status'] not in ('done',) %}
+            <div class="mono" style="font-size:11px;color:var(--ink-3)">{{ v['stage'] or '未开始' }} · {{ v['progress'] }}%</div>
+          {% endif %}
+        </td>
+        <td class="num">{{ v['duration'] | ts }}</td>
+        <td class="num">{{ v['size'] | size }}</td>
+        <td class="num mono" style="font-size:12px">{{ v['created_at'] | dt }}</td>
+        <td class="num">
+          {% if v['status'] == 'done' and v['total'] is not none %}
+            <a href="/videos/{{ v['id'] }}"><b style="font-size:17px">{{ v['total'] | g }}</b></a>
+            <span class="tag">{{ v['band'] or '—' }}</span>
+          {% else %}<span class="dim-text">—</span>{% endif %}
+        </td>
+        <td>
+          <div class="row-actions">
+            {% if v['status'] == 'done' %}
+              <a class="btn small ghost" href="/videos/{{ v['id'] }}">报告</a>
+            {% elif v['status'] == 'uploaded' or v['status'] == 'failed' %}
+              <form class="inline-form" method="post" action="/videos/{{ v['id'] }}/analyze">
+                <button class="btn small" type="submit">分析</button>
+              </form>
+            {% else %}
+              <a class="btn small ghost" href="/videos/{{ v['id'] }}">进度</a>
+            {% endif %}
+            <form class="inline-form" method="post" action="/videos/{{ v['id'] }}/delete"
+                  onsubmit="return confirm('删除《{{ v['title'] }}》及其评价与产物？')">
+              <button class="btn link small" type="submit">删除</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="dim-text">还没有用户上传视频。</p>{% endif %}
+</section>
+
+{% if site_usage['calls'] %}
+<section class="sheet" data-reveal="{{ [lead + 4, 7]|min }}">
+  <div class="section-title">
+    <h2>用量明细</h2>
+    <span>按阶段 / 用户拆分 · 估算值仅观察量级，计费以控制台账单为准</span>
+  </div>
+  <div class="grid-2">
+    <div class="table-wrap narrow">
+      <table class="sheet-table">
+        <thead><tr><th>阶段</th><th class="num">次数</th><th class="num">输入</th><th class="num">输出</th><th class="num">小计</th></tr></thead>
+        <tbody>
+          {% for s in site_usage['by_stage'] %}
+          <tr><td>{{ s['name'] }}{% if s['estimated'] %} <span class="tag tag-amber" style="font-size:10px;padding:1px 6px">估算</span>{% endif %}</td>
+            <td class="num">{{ s['calls'] }}</td><td class="num">{{ s['prompt'] | n }}</td>
+            <td class="num">{{ s['completion'] | n }}</td><td class="num"><b>{{ s['total'] | n }}</b></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap narrow" style="--table-min:0px">
+      <table class="sheet-table">
+        <thead><tr><th>用户</th><th class="num">次数</th><th class="num">token</th></tr></thead>
+        <tbody>
+          {% for u in site_usage['by_user'] %}
+          <tr><td>{{ u['name'] }}<div class="dim-en">消耗</div></td>
+            <td class="num">{{ u['calls'] }}</td><td class="num"><b>{{ u['total'] | n }}</b></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if site_usage['videos'] %}
+  <p class="mono" style="font-size:11.5px;color:var(--ink-3);margin-top:14px">
+    最近消耗：{% for v in site_usage['videos'] %}#{{ v['id'] }} {{ v['title'][:12] }} {{ v['total'] | n }}
+    {{ '（估算）' if v['estimated'] else '' }}{{ '　·　' if not loop.last }}{% endfor %}
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="sheet" data-reveal="{{ [lead + 5, 7]|min }}">
+  <div class="kicker">Accounts · 开通账号</div>
+  <div class="section-title" style="margin-top:0">
+    <h2>账号开通</h2>
+    <span>自助注册已关闭 · 口令只存加盐哈希，开通后无法再查看</span>
+  </div>
+
+  <div class="grid-2" style="margin-top:16px">
+    <div class="panel">
+      <h3>逐个录入</h3>
+      <form class="stack" method="post" action="/admin/users/create">
+        <div class="field">
+          <label for="username">用户名</label>
+          <input id="username" name="username" type="text" required autocomplete="off" spellcheck="false"
+                 value="{{ account_form.get('username', '') }}" placeholder="如 zhang01 或 20250101">
+          <span class="hint">3–32 位，仅限字母、数字与 . _ -，也是登录时输入的名字</span>
+        </div>
+        <div class="field">
+          <label for="new-password">初始口令</label>
+          <input id="new-password" name="password" type="text" required autocomplete="off" spellcheck="false"
+                 placeholder="至少 6 位">
+          <span class="hint">明文显示便于抄送；线下转告本人后，由其自行改密</span>
+        </div>
+        <div class="row-actions">
+          <button class="btn ghost small" type="button" onclick="randInto('new-password')">随机生成 12 位</button>
+          <span class="mono dim-text" style="font-size:11.5px">已含大小写字母与数字</span>
+        </div>
+        <div class="field">
+          <label for="display-name">显示名（可选）</label>
+          <input id="display-name" name="display_name" type="text" autocomplete="off"
+                 value="{{ account_form.get('display_name', '') }}" placeholder="真实姓名，用于列表与报表">
+        </div>
+        <div class="field">
+          <label for="role">角色</label>
+          <select id="role" name="role">
+            <option value="user" {{ 'selected' if account_form.get('role', 'user') == 'user' }}>普通用户</option>
+            <option value="admin" {{ 'selected' if account_form.get('role') == 'admin' }}>管理员</option>
+          </select>
+          <span class="hint">管理员可进入本后台查看全部用户的视频与评价</span>
+        </div>
+        <div class="row-actions">
+          <button class="btn" type="submit">开通账号</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h3>Excel 批量导入</h3>
+      <p class="dim-text" style="margin:0 0 10px;font-size:13.5px">
+        先下载模板，在 <b>{{ template_columns | join(' / ') }}</b> 三列里逐行填好，再上传回来。
+        模板自带的 <span class="mono">#</span> 开头示例行会被自动跳过，原样上传也不会误建账号。
+      </p>
+      <div class="row-actions" style="margin-bottom:14px">
+        <a class="btn ghost small" href="/admin/users/template">下载 {{ template_name }}</a>
+      </div>
+      <form method="post" action="/admin/users/import" enctype="multipart/form-data">
+        <div class="field">
+          <label for="import-file">选择 .xlsx 文件</label>
+          <div class="drop"><input id="import-file" type="file" name="file" accept=".xlsx,.xlsm" required></div>
+          <span class="hint">上限 {{ template_max_rows }} 行 / {{ template_max_mb }} MB；只新增不删除，
+            重名或填错的行按行号退回，其余照常入库</span>
+        </div>
+        <div class="row-actions" style="margin-top:14px">
+          <button class="btn" type="submit">解析并导入</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if batch %}
+  <div class="alert {{ 'ok' if batch['ok'] else '' }}" style="margin-top:20px;margin-bottom:0">
+    {{ batch['filename'] }}：新建 {{ batch['created'] | length }} 个账号，退回 {{ batch['failed'] | length }} 行{{ '，跳过示例与表头 ' ~ batch['skipped'] ~ ' 行' if batch['skipped'] else '' }}。
+  </div>
+  {% if batch['created'] %}
+  <p style="margin:12px 0 0">
+    {% for name in batch['created'] %}<span class="tag tag-olive">{{ name }}</span> {% endfor %}
+  </p>
+  {% endif %}
+  {% if batch['rows'] %}
+  <div class="table-wrap" style="--table-min:560px;margin-top:14px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th class="num" style="width:64px">行号</th>
+        <th style="width:180px">用户名</th>
+        <th>显示名</th>
+        <th style="width:96px">结果</th>
+        <th>说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in batch['rows'] %}
+      <tr>
+        <td class="num mono" style="font-size:12px">{{ r['line'] }}</td>
+        <td class="mono" style="font-size:12.5px">{{ r['username'] or '—' }}</td>
+        <td>{{ r['display_name'] or '—' }}</td>
+        <td>{% if r['created'] %}<span class="tag tag-olive">已开通</span>
+            {% else %}<span class="tag tag-seal">退回</span>{% endif %}</td>
+        <td>{% if r['reason'] %}<span class="dim-text" style="font-size:13.5px">{{ r['reason'] }}</span>
+            {% else %}<span class="dim-text">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  {% endif %}
+  <script>
+    function randInto(id) {
+      var chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+      var n = 12, out = "";
+      if (window.crypto && window.crypto.getRandomValues) {
+        var buf = new Uint32Array(n);
+        window.crypto.getRandomValues(buf);
+        for (var i = 0; i < n; i++) { out += chars.charAt(buf[i] % chars.length); }
+      } else {
+        for (var j = 0; j < n; j++) { out += chars.charAt(Math.floor(Math.random() * chars.length)); }
+      }
+      var f = document.getElementById(id);
+      if (!f) { return; }
+      f.value = out;
+      f.focus();
+      f.select();
+    }
+  </script>
+</section>
+
+<section class="sheet" data-reveal="{{ [lead + 6, 7]|min }}">
+  <div class="section-title">
+    <h2>用户</h2>
+    <span>{{ users | length }} 个账号</span>
+  </div>
+  <div class="table-wrap pin-first" style="--table-min:900px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th class="num" style="width:56px">ID</th>
+        <th>账号</th>
+        <th class="num">视频</th>
+        <th class="num">已分析</th>
+        <th class="num">上传次数</th>
+        <th class="num">平均总分</th>
+        <th class="num">token</th>
+        <th class="num">注册时间</th>
+        <th style="width:230px">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td class="num dim-text mono">{{ u['id'] }}</td>
+        <td>
+          <b>{{ u['display_name'] or u['username'] }}</b>
+          <span class="mono dim-text" style="font-size:11.5px"> @{{ u['username'] }}</span>
+          {% if u['role'] == 'admin' %}<span class="tag tag-ink">管理员</span>{% endif %}
+        </td>
+        <td class="num">{{ u['video_count'] }}</td>
+        <td class="num">{{ u['done_count'] }}</td>
+        <td class="num mono" style="font-size:12px">
+          {% if u['role'] == 'admin' %}<span class="dim-text">不限</span>
+          {% elif u['upload_used'] >= u['limit_now'] %}<span class="delta-down">{{ u['upload_used'] }}/{{ u['limit_now'] }}</span><div class="delta-down">已用完</div>
+          {% else %}{{ u['upload_used'] }}/{{ u['limit_now'] }}<div class="dim-text">剩 {{ u['limit_now'] - u['upload_used'] }}</div>{% endif %}
+        </td>
+        <td class="num">{% if u['avg_score'] is not none %}{{ u['avg_score'] | g }}{% else %}<span class="dim-text">—</span>{% endif %}</td>
+        <td class="num mono" style="font-size:12px">{{ u['tokens'] | n }}<div class="dim-text">{{ u['api_calls'] }} 次</div></td>
+        <td class="num mono" style="font-size:12px">{{ u['created_at'] | dt }}</td>
+        <td>
+          <details class="pwd-box">
+            <summary>重置口令</summary>
+            <form method="post" action="/admin/users/{{ u['id'] }}/password">
+              <input id="pwd-{{ u['id'] }}" type="text" name="password" required autocomplete="off"
+                     spellcheck="false" placeholder="新口令 ≥6 位">
+              <button class="btn ghost small" type="button" onclick="randInto('pwd-{{ u['id'] }}')">随机</button>
+              <button class="btn small" type="submit">保存</button>
+            </form>
+          </details>
+          {% if u['role'] != 'admin' %}
+          <details class="pwd-box">
+            <summary>上传次数</summary>
+            <form method="post" action="/admin/users/{{ u['id'] }}/quota">
+              <input type="number" name="used" min="0" step="1" value="{{ u['upload_used'] }}"
+                     title="已用次数" class="quota-used">
+              <input type="number" name="limit" min="0" step="1" placeholder="上限，默认 {{ upload_limit_default }}"
+                     title="单独上限：留空不改，填数字覆盖，或用「跟随全局」恢复默认" class="quota-limit">
+              <button class="btn small" type="submit" name="action" value="save">保存</button>
+              <button class="btn ghost small" type="submit" name="action" value="reset">清零已用</button>
+              <button class="btn ghost small" type="submit" name="action" value="default">跟随全局</button>
+            </form>
+          </details>
+          {% endif %}
+          {% if u['id'] != me['id'] %}
+          <form class="inline-form" method="post" action="/admin/users/{{ u['id'] }}/delete"
+                onsubmit="return confirm('删除 @{{ u['username'] }} 及其 {{ u['video_count'] }} 个视频？此操作不可撤销。')">
+            <button class="btn link small" type="submit">删除账号</button>
+          </form>
+          {% else %}<span class="dim-text mono" style="font-size:11px">当前登录账号</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="mono" style="font-size:11.5px;color:var(--ink-3);margin-top:12px">
+    重置口令只改写哈希，用户名、角色与历史视频不受影响；口令不可查看，只能重置。
+    上传次数默认每人 {{ upload_limit_default }} 个视频，用完即止，删掉一条记录即返还一次名额；
+    清零已用可立即放行，单独填上限只作用于该账号（「跟随全局」恢复默认）。
+    删除账号会级联删除其视频、评价与抽帧产物，数据库行不可恢复。
+  </p>
+</section>
+{% endblock %}

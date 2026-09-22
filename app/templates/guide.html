@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}评分标准与使用说明 · 演讲辅助评估系统{% endblock %}
+{% block body %}
+<section class="hero" data-reveal="1">
+  <div class="kicker">Rubric &amp; Method</div>
+  <h1>评分标准<br>与<em>使用说明</em></h1>
+  <p class="lede">这一页说明系统怎么给你的演讲打分：标准来自哪个文件、每个维度由哪条通道判、分数怎么聚合、
+    证据怎么核验，以及什么情况下你不该相信这个分数。</p>
+  <div class="rules">
+    <span class="tag tag-ink">标准版本 {{ rubric.version }}</span>
+    <span class="tag">{{ rubric.dimensions | length }} 个维度</span>
+    <span class="tag">满分 {{ rubric.total | round | int }} 分</span>
+    <span class="tag tag-seal">证据必须回指原文 / 时间点</span>
+  </div>
+</section>
+
+<section data-reveal="2">
+  <div class="section-title" style="margin-top:0"><h2>怎么用</h2><span>四步</span></div>
+  <ol class="steps">
+    <li><div><h4>登录</h4><p>账号与初始口令由管理员在后台开通（支持 Excel 批量导入），本系统不开放自助注册；忘记口令找管理员重置。管理员账号由部署方在 <code>.env</code> 中配置。</p></div></li>
+    <li><div><h4>上传演讲视频并填写题目</h4><p>写上演讲题目与老师要求（例如「2–3 分钟，脱稿」），系统会用它核对时间控制与主题契合度。</p></div></li>
+    <li><div><h4>点击分析</h4><p>后台任务按「抽帧抽音 → 转录 → 三通道评分 → 聚合核验 → 生成评语」推进，页面实时显示进度，可离开再回来。</p></div></li>
+    <li><div><h4>对比历次</h4><p>多次上传后按维度对比：雷达图看形状变化，Δ 表看涨跌，复发问题清单看老毛病有没有改掉。</p></div></li>
+  </ol>
+  <div class="row-actions" style="margin-top:22px">
+    {% if me %}<a class="btn" href="{{ '/admin' if me['role'] == 'admin' else '/dashboard' }}">{{ '回到管理后台' if me['role'] == 'admin' else '回到我的演讲' }}</a>{% endif %}
+    {% if not me %}<a class="btn" href="/login">登录开始评价</a>
+    <a class="btn ghost" href="/guide#rubric">看评分标准</a>{% endif %}
+  </div>
+</section>
+
+<section id="rubric" data-reveal="3">
+  <div class="section-title"><h2>评分标准</h2><span>{{ rubric.title }} · {{ rubric.version }}</span></div>
+  <div class="table-wrap narrow">
+  <table class="sheet-table">
+    <thead><tr><th style="width:34px">#</th><th style="width:16%">维度</th><th>评分要点</th><th class="num" style="width:64px">满分</th></tr></thead>
+    <tbody>
+      {% for d in rubric.dimensions %}
+      <tr>
+        <td class="num">{{ '%02d' % d.index }}</td>
+        <td><b>{{ d.name }}</b><div class="dim-en">{{ d.name_en }}</div></td>
+        <td style="font-size:14px;color:var(--ink-2)">
+          {% if d.checkpoints %}
+            {% for c in d.checkpoints %}· {{ c }}<br>{% endfor %}
+          {% else %}{{ d.raw }}{% endif %}
+        </td>
+        <td class="num">{{ d.max_score | g }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section data-reveal="4">
+  <div class="section-title"><h2>谁给哪个维度打分</h2><span>通道归属</span></div>
+  <div class="table-wrap narrow">
+  <table class="sheet-table">
+    <thead><tr><th style="width:30%">维度</th><th>判定通道</th><th class="num" style="width:36%">权重分配</th></tr></thead>
+    <tbody>
+      {% for m in dim_channels %}
+      <tr>
+        <td><b>{{ m.name }}</b></td>
+        <td style="font-size:14px;color:var(--ink-2)">{{ m.who }}</td>
+        <td class="num" style="font-size:13px">{{ m.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="dim-text" style="font-size:14px;margin-top:10px">
+    归属由维度名称与要点里的关键词决定（如「眼神/手势/站姿」归画面，「发音/语调/流利」归语音）。
+    某条通道失败时，该维度会自动按剩余通道重新归一化，并在报告里标记为「未评 / 降级」。
+  </p>
+</section>
+
+<section data-reveal="5">
+  <div class="section-title"><h2>关于分数</h2><span>可信度说明</span></div>
+  <div class="grid-2">
+    <div class="panel">
+      <h3>分数怎么来</h3>
+      <ul>
+        <li>每个维度只由与该维度相关的通道给分（如「态势语」只看画面，「发音语调」只听音频）。</li>
+        <li>多通道时按权重与置信度加权，缺通道会自动重新归一化并标记「未评」。</li>
+        <li>时间控制以实测时长为准，评审通道不能凭感觉给分。</li>
+        <li>总分由维度分相加得到，不由评审通道直接报出，避免「算错总分」。</li>
+        <li>报告里的「本地逐帧测量」（正脸率、头部偏向）是在本机算出来的，只用来交叉核对与提示人工回看，<b>不参与加权求和</b>。</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>什么时候不该信</h3>
+      <ul>
+        <li>报告底部的「质控记录」列出降级、跳过、证据未命中原文的情况。</li>
+        <li>若视频没有连续人声，转写会不可信，文字通道置信度会被自动下调。</li>
+        <li>置信度低于 60% 的维度请以证据条目为准，必要时重新上传更清晰的音源。</li>
+        <li>引用的原句必须在转写稿里真实存在，否则该条证据会被剔除、分数随之打折。</li>
+        <li>眼神与表情的判断依据<em>稀疏抽取的静态画面</em>：眨眼频率、瞬时微表情看不出来。测不准时报告会写「本地逐帧测量未采信」，此时只有画面判断，请回看原视频再定。</li>
+      </ul>
+    </div>
+  </div>
+  <div class="grid-2" style="margin-top:22px">
+    <div class="panel">
+      <h3>评语与分数的关系</h3>
+      <ul>
+        <li>优点、缺点、改进建议、总结在分数确定之后才生成，<b>不会反向改动分数</b>。</li>
+        <li>评语只负责解释分数怎么来的，以及下一步具体怎么改。</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>历次对比看什么</h3>
+      <ul>
+        <li>雷达图看形状是否变圆，Δ 表看每个维度相对第一次的涨跌。</li>
+        <li>「反复出现的问题」按问题签名跨次统计，同一毛病出现两次以上才会列出。</li>
+        <li>对比只在同一份标准版本之间进行，标准换版后不会混在一起比。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section data-reveal="6">
+  <div class="section-title"><h2>转录与评审</h2><span>数据来源</span></div>
+  <div class="grid-2">
+    <div class="panel">
+      <h3>语音转录</h3>
+      {% if asr_engine == 'whisper' %}
+      <p style="font-size:15px">当前使用<b>本地</b>转录引擎（CPU 推理），
+        音频不出机器；若本地引擎不可用会自动回落到云端转录，并在质控记录里说明。</p>
+      {% else %}
+      <p style="font-size:15px">当前使用<b>云端</b>转录：音频抽取为 16k 单声道后按约 3 分钟切块，
+        逐块送去识别，段首打上时间标签后拼接成稿。音频会上传到服务端。</p>
+      {% endif %}
+      <p class="dim-text" style="font-size:14px;margin-top:10px">
+        转录引擎由管理员在「系统设置」中统一配置；报告页的质控记录会说明本次实际采用的转录方式。
+      </p>
+    </div>
+    <div class="panel">
+      <h3>评审通道</h3>
+      <ul>
+        <li>文本通道：依据完整转录稿逐维度打分</li>
+        <li>画面通道：依据带时间标签的关键帧序列</li>
+        <li>语音通道：依据原始音频片段听审表达与节奏</li>
+        <li>三条通道各自独立给分与举证，再由确定性规则聚合成总分。</li>
+      </ul>
+      {% if not real_mode %}
+      <p class="tag tag-amber" style="margin-top:6px">未检测到有效 API Key，当前为演示模式，分数不具备评价意义。</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="panel" style="margin-top:22px">
+    <h3>用量统计（token）</h3>
+    <p style="font-size:15px;margin:0 0 10px">
+      每次分析都会记账：转录、三条评判通道、评语生成分别调用了几次、消耗多少输入 / 输出 token。
+      数字会显示在报告页、我的演讲与管理后台，并按「阶段」汇总。
+    </p>
+    <ul>
+      <li>响应里带 <code>usage</code> 时取真实值；流式响应不含 <code>usage</code> 时按字符数估算，并在明细里标记为「估算」。</li>
+      <li>估算规则：中日韩字符按 1 字 1 token，其余按 4 字符 1 token；每张关键帧记 1000 token，音频按 base64 长度折算。</li>
+      <li>估算值只用于观察量级，<b>计费请以服务方控制台账单为准</b>。</li>
+      <li>分析中途失败时，已经消耗掉的 token 仍会落库，不会丢账。</li>
+    </ul>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}分析进行中 · {{ video['title'] }}{% endblock %}
+{% block body %}
+{% set steps = [
+  (3,  '排队等待', '任务已进入后台队列'),
+  (8,  '抽取音频与关键帧', 'ffmpeg 分离 16k 单声道音频，按视频长度抽关键帧（约每 5 秒一张）'),
+  (15, '逐帧测量人脸朝向', '本地可选测量正脸率与头部偏向，只作质控参考，不参与打分'),
+  (22, '转录语音', '逐段转写音频，并检测是否为连续人声'),
+  (45, '三通道评价', '文本 / 画面 / 语音各自按标准独立给分'),
+  (84, '聚合与证据核验', '加权合成、时间轴核对、引语回指原文'),
+  (91, '生成评语', '优点、缺点、改进建议与总结'),
+  (100,'写入报告', '入库并跳转到报告页')
+] %}
+{% set current = video['progress'] if video['status'] != 'done' else 100 %}
+
+<section class="sheet" data-reveal="1">
+  <div class="kicker">{{ 'Analysis · ' ~ video['id'] | string }}</div>
+  <div class="section-title" style="margin-top:0">
+    <h2>{{ video['title'] }}</h2>
+    <span>{{ video['filename'] }} · {{ video['size'] | size }}</span>
+  </div>
+
+  {% if video['status'] == 'uploaded' %}
+    <p class="lede">视频已保存，尚未开始分析。点击下方按钮，系统会按「转录 → 三通道评价 → 聚合核验 → 生成评语」执行。</p>
+    <form method="post" action="/videos/{{ video['id'] }}/analyze">
+      <button class="btn" type="submit">开始分析</button>
+    </form>
+  {% else %}
+    <p class="lede" id="stage-line">
+      {% if video['status'] == 'failed' %}<b style="color:var(--seal)">分析中断</b>
+      {% elif video['status'] == 'done' %}<b style="color:var(--olive)">分析完成</b>
+      {% else %}<span class="spinner"></span> 正在处理：<b>{{ video['stage'] }}</b>{% endif %}
+    </p>
+
+    <div class="progress-rail" style="margin:18px 0 6px">
+      <i id="rail" style="width: {{ current }}%"></i>
+    </div>
+    <div class="mono" style="font-size:12px;color:var(--ink-3);display:flex;justify-content:space-between">
+      <span id="pct-text">{{ current }}%</span>
+      <span>通常 1–4 分钟 · 可离开本页，稍后回来查看</span>
+    </div>
+
+    <ul class="stage-list">
+      {% for p, name, desc in steps %}
+      <li class="{{ 'done' if current > p or video['status'] == 'done' else ('now' if current >= p and video['status'] not in ('done','failed') else '') }}"
+          data-step="{{ p }}">
+        <span class="bullet"></span>
+        <span><b style="font-family:var(--font-display);font-size:14px;letter-spacing:.06em">{{ name }}</b>
+          <div class="dim-text" style="font-size:12px;line-height:1.5">{{ desc }}</div></span>
+        <span class="mono" style="font-size:11px">{{ '%03d' % p }}%</span>
+      </li>
+      {% endfor %}
+    </ul>
+
+    {% if video['status'] == 'failed' and video['error'] %}
+      <div class="alert" style="margin-top:22px">
+        <b>失败原因：</b><span class="mono" style="font-size:13px">{{ video['error'] }}</span>
+        <div class="row-actions" style="margin-top:10px">
+          <form class="inline-form" method="post" action="/videos/{{ video['id'] }}/analyze">
+            <button class="btn small" type="submit">重新分析</button>
+          </form>
+          <a class="btn small ghost" href="{{ '/admin' if me['role'] == 'admin' else '/dashboard' }}">返回{% if me['role'] == 'admin' %}后台{% else %}记录{% endif %}</a>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="row-actions" style="margin-top:22px">
+      <a class="btn ghost" href="{{ '/admin' if me['role'] == 'admin' else '/dashboard' }}">返回{% if me['role'] == 'admin' %}后台{% else %}记录{% endif %}</a>
+      {% if video['topic'] %}<span class="tag">题目：{{ video['topic'] }}</span>{% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block script %}
+{% if video['status'] in ('queued', 'transcribing', 'analyzing') %}
+<script>
+(function () {
+  var id = {{ video['id'] }};
+  var steps = [3, 8, 22, 45, 84, 91, 100];
+  function paint(p, stage, status) {
+    document.getElementById('rail').style.width = Math.max(0, Math.min(100, p)) + '%';
+    document.getElementById('pct-text').textContent = p + '%';
+    document.getElementById('stage-line').innerHTML =
+      '<span class="spinner"></span> 正在处理：<b>' + (stage || '') + '</b>';
+    var list = document.querySelectorAll('.stage-list li');
+    list.forEach(function (li) {
+      var s = parseInt(li.getAttribute('data-step'), 10);
+      li.className = (p > s) ? 'done' : (p >= s ? 'now' : '');
+    });
+  }
+  function tick() {
+    fetch('/videos/' + id + '/status', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.status === 'done' || s.status === 'failed') { window.location.reload(); return; }
+        paint(s.progress || 0, s.stage, s.status);
+      })
+      .catch(function () {});
+  }
+  setInterval(tick, 2500);
+  tick();
+})();
+</script>
+{% endif %}
+{% endblock %}

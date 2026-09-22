@@ -1,0 +1,42 @@
+# 由 deploy/install.sh 渲染（替换 __APPDIR__ / __HOST__ / __PORT__）后写入
+# /etc/systemd/system/speech-assist.service
+#
+# 关键点：**只有一个 uvicorn 进程，绝不加 --workers**。
+# 分析队列、抽帧线程池、千问在途请求闸门都在进程内存里，两个 worker 等于两套
+# 互不知情的池子——同时分析路数翻倍、去重失效、/health 只反映其中一个进程。
+# 参见 docs/设计报告.md §14.1。
+
+[Unit]
+Description=演讲评分系统 (speech-assist)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=speech
+Group=speech
+WorkingDirectory=__APPDIR__
+
+# 数据目录与代码目录分开，升级代码时不会碰库和文件。
+# 换到独立数据盘只改这一行（改完记得把旧 data/ 里的内容搬过去）。
+Environment=DATA_DIR=__APPDIR__/data
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+ExecStart=__APPDIR__/.venv/bin/python -m uvicorn app.main:app \
+    --host __HOST__ --port __PORT__ --no-access-log
+
+Restart=always
+RestartSec=3
+# 停止时给在途请求留出收尾时间；被中断的分析任务会在下次启动时由
+# reset_stale_jobs() 标成"已中断"，用户点重试即可。
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

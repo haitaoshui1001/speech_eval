@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}注册 · 演讲辅助评估系统{% endblock %}
+{% block body %}
+<div class="sheet" style="max-width:640px" data-reveal="1">
+  <div class="kicker">New Reviewer</div>
+  <h1 style="font-size:30px;margin-bottom:6px">注册一个账号</h1>
+  <p class="lede" style="font-size:16px">注册后即可上传演讲视频、一键分析，并保留历次记录用于对比。</p>
+
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+  <form class="stack" method="post" action="/register">
+    <div class="field">
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" required autocomplete="username"
+             value="{{ (form or {}).get('username', '') }}" placeholder="例如 liyan">
+      <div class="hint">3–32 位，字母、数字与 . _ -</div>
+    </div>
+    <div class="field">
+      <label for="display_name">显示名（可选）</label>
+      <input id="display_name" name="display_name" type="text" autocomplete="nickname"
+             value="{{ (form or {}).get('display_name', '') }}" placeholder="报告抬头用的名字">
+    </div>
+    <div class="field">
+      <label for="password">口令</label>
+      <input id="password" name="password" type="password" required autocomplete="new-password" placeholder="至少 6 位">
+    </div>
+    <div class="field">
+      <label for="confirm">确认口令</label>
+      <input id="confirm" name="confirm" type="password" required autocomplete="new-password">
+    </div>
+    <div class="row-actions">
+      <button class="btn" type="submit">创建账号</button>
+      <a class="btn ghost" href="/login">已有账号</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

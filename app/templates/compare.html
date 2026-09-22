@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}历次对比 · 演讲辅助评估系统{% endblock %}
+{% block body %}
+{% set chosen_ids = data | map(attribute='video') | map(attribute='id') | list %}
+{% set last3 = history[-3:] | map(attribute='id') | list | join(',') %}
+{% set last2 = history[-2:] | map(attribute='id') | list | join(',') %}
+
+{% if msg %}<section class="sheet" data-reveal="1"><div class="alert">{{ msg }}</div></section>{% endif %}
+
+<section class="sheet" data-reveal="{{ 1 if not msg else 2 }}">
+  <div class="kicker">Compare · 按评分标准逐项对照</div>
+  <div class="section-title" style="margin-top:0">
+    <h2>历次演讲对比</h2>
+    <span>已分析 {{ history | length }} 次 · 本页选 {{ data | length }} 次</span>
+  </div>
+  <p class="lede">雷达图按「得分率」叠加，形状越接近外圈正七边形说明各维度越均衡；Δ 表按标准里的同一维度做绝对分差，不受视频难度影响。最多同时对比 6 次。</p>
+
+  {% if history | length < 2 %}
+    <div class="alert info" style="margin-top:16px">
+      至少需要 <b>两次已完成分析</b> 才能对比。当前只有一次（或没有）。上传新视频并分析后回到这里。
+    </div>
+  {% else %}
+  <form method="get" action="/compare" style="margin-top:18px">
+    <div class="table-wrap pin-first" style="--table-min:620px">
+    <table class="sheet-table">
+      <thead>
+        <tr>
+          <th style="width:34px"></th>
+          <th>演讲</th>
+          <th class="num">分析时间</th>
+          <th class="num">总分</th>
+          <th style="width:64px">档位</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in history | reverse | list %}
+        <tr>
+          <td><input class="pick" type="checkbox" name="ids" value="{{ h['id'] }}"
+                     {{ 'checked' if h['id'] in chosen_ids }}></td>
+          <td>
+            <a href="/videos/{{ h['id'] }}" style="font-weight:700">{{ h['title'] }}</a>
+            {% if h['topic'] %}<span class="dim-text mono" style="font-size:11px"> · {{ h['topic'] }}</span>{% endif %}
+          </td>
+          <td class="num dim-text">{{ h['analyzed_at'] | dt }}</td>
+          <td class="num"><b>{{ h['total'] | g }}</b><span class="dim-text">/{{ h['max_total'] | g }}</span></td>
+          <td><span class="tag {{ 'tag-olive' if h['band'] in ['A','B'] else ('tag-amber' if h['band'] == 'C' else 'tag-seal') }}">{{ h['band'] }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <div class="row-actions" style="margin-top:14px">
+      <button class="btn" type="submit">对比所勾选</button>
+      <a class="btn ghost small" href="/compare?ids={{ last3 }}">最近三次</a>
+      {% if history | length >= 2 %}<a class="btn ghost small" href="/compare?ids={{ last2 }}">最近两次</a>{% endif %}
+      <a class="btn ghost small" href="/compare">默认（最近三次）</a>
+      <span class="mono" style="font-size:11px;color:var(--ink-3)">未勾选时自动使用最近三次</span>
+    </div>
+  </form>
+  {% endif %}
+</section>
+
+{% if data | length >= 2 %}
+<section class="sheet" data-reveal="3">
+  <div class="section-title">
+    <h2>维度轮廓</h2>
+    <span>{{ data | length }} 次叠加 · 半径 = 得分率</span>
+  </div>
+  <div class="grid-2" style="align-items:start">
+    <div>
+      {{ radar | safe }}
+      <div class="legend">
+        {% for item in data %}
+        <span><i style="background:{{ palette[loop.index0 % palette | length] }}"></i>
+          第 {{ loop.index }} 图 · {{ item['video']['title'] | truncate(14, true) }}（{{ item['video']['total'] | g }} 分）</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="grid-2" style="grid-template-columns:1fr;gap:14px">
+      {% set best, worst = best_worst %}
+      {% if best %}
+      <div class="panel good">
+        <h3>最稳的维度</h3>
+        <p style="margin:0 0 6px"><b style="font-size:19px">{{ best['name'] }}</b>
+          <span class="mono dim-text"> 平均得分率 {{ best['pct'] }}%</span></p>
+        <p class="dim-text" style="margin:0;font-size:14px">覆盖 {{ best['n'] }} 次评价。保持的方式是继续按标准要求准备，而不是降低难度。</p>
+      </div>
+      <div class="panel seal">
+        <h3>最拖分的维度</h3>
+        <p style="margin:0 0 6px"><b style="font-size:19px">{{ worst['name'] }}</b>
+          <span class="mono dim-text"> 平均得分率 {{ worst['pct'] }}%</span></p>
+        <p class="dim-text" style="margin:0;font-size:14px">覆盖 {{ worst['n'] }} 次评价。建议下一次只针对它做专项练习，避免全面改导致哪一项都没提上去。</p>
+      </div>
+      {% endif %}
+      <div class="panel">
+        <h3>怎么读这张图</h3>
+        <ul>
+          <li>内圈虚线是 25% / 50% / 75% 得分率，最外圈是该维度满分。</li>
+          <li>某条线在一个轴上突然塌陷，就是那一次演讲的失分点。</li>
+          <li>两条线在同一轴上一高一低，说明这项能力还不稳定，而不是「这次没准备好」。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sheet" data-reveal="4">
+  <div class="section-title">
+    <h2>逐项分值对照</h2>
+    <span>横看同一次演讲，竖看同一维度</span>
+  </div>
+  <div class="table-wrap pin-first" style="--table-min:820px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th>维度</th>
+        {% for item in data %}
+        <th class="num" style="color:{{ palette[loop.index0 % palette | length] }}">
+          第 {{ loop.index }} 次<br>
+          <span class="mono" style="font-size:10.5px;letter-spacing:.06em;color:var(--ink-3);text-transform:none">
+            {{ item['video']['analyzed_at'] | dt }}</span>
+        </th>
+        {% endfor %}
+        <th class="bar-cell">波动</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in rubric.dimensions %}
+      {% set ns = namespace(vals=[]) %}
+      <tr>
+        <td>
+          <b>{{ d.index }}. {{ d.name }}</b>
+          <div class="dim-en">{{ d.name_en }} · 满分 {{ d.max_score | g }}</div>
+        </td>
+        {% for item in data %}
+          {% set cell = item['dims'].get(d.key) %}
+          {% set sc = (cell['score'] if cell else none) %}
+          {% set _ = ns.vals.append(sc if sc is not none else 0) %}
+        <td class="num" {% if cell and cell['ratio'] is not none and cell['ratio'] < 0.6 %}style="color:var(--seal)"{% endif %}>
+          {{ sc | g if sc is not none else '—' }}
+        </td>
+        {% endfor %}
+        <td class="bar-cell">
+          {% if ns.vals | length > 1 %}
+            {% set spread = (ns.vals | max) - (ns.vals | min) %}
+            <div class="meter {% if spread <= d.max_score * 0.1 %}ok{% elif spread <= d.max_score * 0.25 %}warn{% else %}bad{% endif %}"
+                 style="height:8px">
+              <i style="width: {{ [100, (spread / d.max_score * 100) | round | int] | min }}%"></i>
+            </div>
+            <span class="mono" style="font-size:11px;color:var(--ink-3)">极差 {{ spread | g }} 分</span>
+          {% else %}<span class="dim-text mono" style="font-size:11px">仅一次</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      <tr style="border-top:2px solid var(--ink)">
+        <td><b>合计</b></td>
+        {% for item in data %}
+        <td class="num"><b style="font-size:17px">{{ item['video']['total'] | g }}</b>
+          <span class="dim-text">/{{ item['video']['max_total'] | g }}</span></td>
+        {% endfor %}
+        <td class="bar-cell"></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="mono" style="font-size:11.5px;color:var(--ink-3);margin-top:10px">
+    波动条 = 该维度在各次之间的极差 ÷ 满分。条越短越稳定；超过 25% 说明这项还没形成稳定能力。
+  </p>
+</section>
+
+<section class="sheet" data-reveal="5">
+  <div class="section-title">
+    <h2>变化量 Δ</h2>
+    <span>所选区间：第一次 → 最后一次</span>
+  </div>
+  {% if deltas %}
+  <div class="table-wrap pin-first" style="--table-min:680px">
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th>维度</th>
+        <th class="num">起</th>
+        <th class="num">止</th>
+        <th class="num">Δ 绝对分</th>
+        <th class="num">Δ 得分率</th>
+        <th>结论</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for dd in deltas %}
+      {% set cls = 'delta-up' if dd['delta'] > 0 else ('delta-down' if dd['delta'] < 0 else 'delta-flat') %}
+      <tr>
+        <td><b>{{ dd['name'] }}</b> <span class="dim-text mono" style="font-size:11px">/{{ dd['max'] | g }}</span></td>
+        <td class="num dim-text">{{ dd['from'] | g }}</td>
+        <td class="num"><b>{{ dd['to'] | g }}</b></td>
+        <td class="num {{ cls }}"><b>{{ '%+g' % dd['delta'] }}</b></td>
+        <td class="num {{ cls }}">{{ '%+.1f' % dd['pct'] }}%</td>
+        <td>
+          {% if dd['delta'] > dd['max'] * 0.15 %}明显进步，保持训练量
+          {% elif dd['delta'] > 0 %}小幅改善，尚在同一误差范围内
+          {% elif dd['delta'] < -dd['max'] * 0.15 %}明显退步，回看这次的证据
+          {% elif dd['delta'] < 0 %}小幅下降，注意是否偶发
+          {% else %}持平{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="dim-text">所选的两次评价没有共同维度记录，无法计算 Δ。</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if trend %}
+<section class="sheet" data-reveal="6">
+  <div class="section-title">
+    <h2>{% if trend_gaze %}总分与眼神接触率趋势{% else %}总分趋势{% endif %}</h2>
+    <span>全部 {{ history | length }} 次已分析演讲，按时间顺序</span>
+  </div>
+  <div class="chart-scroll">{{ trend | safe }}</div>
+  <p class="mono" style="font-size:11.5px;color:var(--ink-3);margin-top:10px">
+    纵轴上限取各次满分中的最大值；若某次评分标准的满分不同，请按得分率而不是绝对分比较。
+    {% if trend_gaze %}
+    虚线是本地逐帧测量的正脸率，只作质控参考，<b>不参与加权求和</b>；早年未开启测量的记录不会画点，
+    图上留空表示「没测」，不是「测出 0%」。
+    {% endif %}
+  </p>
+</section>
+{% endif %}
+
+{% if recurring %}
+<section class="sheet" data-reveal="7">
+  <div class="section-title">
+    <h2>反复出现的问题</h2>
+    <span>同签名问题跨次聚合</span>
+  </div>
+  <p class="lede">这些不是「某一次的失误」，而是重复出现的习惯。它们比任何单项低分都值得先改。</p>
+  <ol class="qc" style="margin-top:14px">
+    {% for r in recurring %}
+    <li>
+      <b>{{ r['label'] }}</b>
+      <span class="tag">{{ r['dim_key'] }}</span>
+      出现 {{ r['times'] }} 次 / 共 {{ r['total_videos'] }} 份有问题的报告
+      <a class="btn link small" href="/videos/{{ r['video_id'] }}">看最近一次证据 →</a>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% block title %}评价报告 · {{ video['title'] }}{% endblock %}
+{% block body %}
+{% set pct = report['pct'] or 0 %}
+{% set conf = report['confidence'] or 0 %}
+{% set usage = report['usage'] %}
+
+<div class="mono no-print" style="font-size:11.5px;letter-spacing:.1em;color:var(--ink-3);margin-bottom:14px">
+  <a href="{{ '/admin' if me['role'] == 'admin' else '/dashboard' }}">{{ '管理后台' if me['role'] == 'admin' else '我的演讲' }}</a> / 报告 #{{ video['id'] }}
+  {%- if not is_owner %} · 用户 {{ video['username'] }}{% endif %}
+</div>
+
+<section class="sheet" data-reveal="1">
+  <div class="kicker">Review Sheet · {{ report['rubric_version'] }}</div>
+  <div class="head-flex">
+    <div class="head-main">
+      <h1 style="font-size:clamp(26px,4vw,40px);margin:0 0 6px">{{ video['title'] }}</h1>
+      <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">
+        {{ video['topic'] or '未填写题目' }} · {{ video['duration'] | ts }} ·
+        {{ video['width'] }}×{{ video['height'] }} · {{ video['size'] | size }} ·
+        分析于 {{ video['analyzed_at'] | dt }}
+      </div>
+    </div>
+    <div class="row-actions no-print">
+      <button class="btn ghost small" type="button" onclick="window.print()">打印 / 存 PDF</button>
+      {% if prev and is_owner %}<a class="btn small ghost" href="/compare?ids={{ prev['video']['id'] }},{{ video['id'] }}">与上次对比</a>{% endif %}
+      <form class="inline-form" method="post" action="/videos/{{ video['id'] }}/analyze">
+        <button class="btn small" type="submit"
+                onclick="return confirm('重新分析会覆盖当前报告，继续？')">重新分析</button>
+      </form>
+    </div>
+  </div>
+
+  <hr class="rule">
+
+  <div class="scorehead">
+    <div>
+      <div class="scoreline">
+        <span class="score-big">{{ report['total'] | g }}</span>
+        <span class="score-max">/ {{ report['max_total'] | g }} 分（{{ pct | round(1) }}%）</span>
+      </div>
+      <div class="meter {{ 'ok' if pct >= 80 else ('warn' if pct >= 60 else 'bad') }}"
+           style="margin-top:12px;max-width:420px"><i style="width: {{ pct | round | int }}%"></i></div>
+      <div class="score-meta">
+        <div>判分可信度<b>{{ '%.0f' % (conf * 100) }}%</b>
+          <div class="meter {{ 'ok' if conf >= 0.6 else ('warn' if conf >= 0.4 else 'bad') }}"
+               style="width:110px;margin-top:3px"><i style="width: {{ (conf * 100) | round | int }}%"></i></div>
+        </div>
+        <div>本次次序<b>第 {{ rank }} / {{ total_runs }} 次</b></div>
+        {% if prev %}
+        <div>较上次<b class="{{ 'delta-up' if report['total'] > prev['video']['total'] else ('delta-down' if report['total'] < prev['video']['total'] else '') }}">
+          {{ '%+g' % (report['total'] - prev['video']['total']) }}</b></div>
+        {% endif %}
+        <div>评审通道<b style="font-size:13px">文本 · 画面 · 语音</b></div>
+        {% if usage and usage['calls'] %}
+        <div>用量<b>{{ usage['total'] | n }} token</b>
+          <div class="hint mono" style="font-size:11px;color:var(--ink-3)">{{ usage['calls'] }} 次调用 ·
+            入 {{ usage['prompt'] | n }} / 出 {{ usage['completion'] | n }}
+            {%- if usage['estimated_calls'] %} · 含 {{ usage['estimated_calls'] }} 次估算{% endif %}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <div style="text-align:center">
+      <div class="seal-badge" data-band="{{ report['band'] }}">{{ report['band'] or '—' }}<small>BAND</small></div>
+      <div class="mono" style="font-size:10.5px;letter-spacing:.16em;color:var(--ink-3);margin-top:8px">
+        {{ '优秀' if report['band'] == 'A' else ('良好' if report['band'] == 'B' else ('中等' if report['band'] == 'C' else ('及格' if report['band'] == 'D' else '待提高'))) }}</div>
+    </div>
+  </div>
+
+  <div class="alert {{ 'ok' if report['timing']['ok'] else 'info' }}" style="margin-top:24px">
+    <b>时间控制核查：</b>{{ report['timing']['note'] or '未设定时间要求' }}
+    <span class="mono dim-text" style="font-size:11.5px">（实测 {{ report['timing']['duration'] | ts }}）</span>
+  </div>
+</section>
+
+<section class="sheet" data-reveal="2">
+  <div class="section-title" style="margin-top:0"><h2>总体评价</h2><span>Summary</span></div>
+  <div class="prose">
+    {% for para in report['summary'].split('\n') if para.strip() %}<p>{{ para.strip() }}</p>{% endfor %}
+  </div>
+  {% if report['next_focus'] %}
+  <div class="focus"><b>下一步只练一件事</b><span>{{ report['next_focus'] }}</span></div>
+  {% endif %}
+</section>
+
+<section class="sheet" data-reveal="3">
+  <div class="section-title" style="margin-top:0"><h2>优点与缺点</h2>
+    <span>整行排列 · 不再分栏</span></div>
+  <div class="rows">
+    <div class="panel good">
+      <h3>优点</h3>
+      <ul>{% for a in report['advantages'] %}<li>{{ a }}</li>{% else %}<li class="dim-text">未提取到明确优点。</li>{% endfor %}</ul>
+    </div>
+    <div class="panel seal">
+      <h3>缺点</h3>
+      <ul>{% for d in report['disadvantages'] %}<li>{{ d }}</li>{% else %}<li class="dim-text">未提取到明确缺点。</li>{% endfor %}</ul>
+    </div>
+  </div>
+</section>
+
+<section class="sheet" data-reveal="4">
+  <div class="section-title" style="margin-top:0"><h2>分项得分</h2>
+    <span>{{ dims | length }} 个维度 · 满分 {{ report['max_total'] | g }}</span></div>
+
+  {% for d in dims %}
+  {% set ratio = (d['ratio'] or 0) * 100 %}
+  <div class="dim">
+    <div class="dim-head">
+      <span class="dim-idx">{{ '%02d' % d['index'] }}</span>
+      <div>
+        <div class="dim-name">{{ d['name'] }}</div>
+        <div class="dim-en">{{ d['name_en'] }}</div>
+      </div>
+      <div class="dim-score">{{ d['score'] | g }}<s>/{{ d['max_score'] | g }}</s></div>
+      <div style="text-align:right">
+        <span class="tag {{ 'tag-olive' if d['band'] in ('A','B') else ('tag-amber' if d['band'] == 'C' else 'tag-seal') }}">
+          {{ d['band'] }}</span>
+        <div class="mono" style="font-size:10.5px;color:var(--ink-3)">可信度 {{ '%.0f' % ((d['confidence'] or 0) * 100) }}%</div>
+      </div>
+      <div class="dim-bar">
+        <div class="meter {{ 'ok' if ratio >= 80 else ('warn' if ratio >= 60 else 'bad') }}"><i style="width: {{ ratio | round | int }}%"></i></div>
+      </div>
+    </div>
+
+    <div class="dim-detail">
+      {% if d['checkpoints'] %}
+      <div class="mono" style="font-size:11px;color:var(--ink-3);margin-bottom:8px">
+        评分要点：{{ d['checkpoints'] | join(' ／ ') }}</div>
+      {% endif %}
+      {% for n in d['notes'] %}<div style="font-size:14px;color:var(--ink-2);margin-bottom:8px">{{ n }}</div>{% endfor %}
+      {% for s in d['strengths'] %}<div class="strength">{{ s }}</div>{% endfor %}
+
+      {% if d['issues'] %}
+      <details class="ev" {{ 'open' if d['issues'] | length <= 2 }}>
+        <summary>问题与证据 · {{ d['issues'] | length }} 条</summary>
+        <div class="ev-in">
+          {% for i in d['issues'] %}
+          <div class="issue">
+            <div class="desc"><span class="issue-no">{{ '%02d' % loop.index }}</span>{{ i['desc'] }}</div>
+            {% if i['quote'] %}
+            <div class="quote">「{{ i['quote'] }}」</div>
+            {% endif %}
+            <div class="meta">
+              {% if i['at'] %}
+                <span class="time-chip" data-seek="{{ i['at'] }}">{{ i['at'] }}</span>
+              {% endif %}
+              {% if i['channel'] %}<span class="tag">{{ i['channel'] }}通道</span>{% endif %}
+              {% if i['evidence_ok'] %}<span class="tag tag-olive">证据已核验</span>
+              {% else %}<span class="tag tag-amber">证据未回指原文</span>{% endif %}
+            </div>
+            {% if i['fix'] %}<div class="fix">→ {{ i['fix'] }}</div>{% endif %}
+            {% if i['example'] %}<div class="dim-text" style="font-size:13.5px">示范：{{ i['example'] }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="sheet" data-reveal="5">
+  <div class="section-title" style="margin-top:0"><h2>证据材料</h2><span>可回看</span></div>
+
+  <div class="player">
+    <video id="player" controls preload="metadata" poster="/videos/{{ video['id'] }}/asset/cover.jpg"
+           src="/videos/{{ video['id'] }}/play"></video>
+  </div>
+
+  {% if face %}
+  <div class="facemeter">
+    {% if face['available'] %}
+    <b>本地逐帧测量</b> · {{ face['headline'] }} · 采样 {{ face['scanned'] }} 帧
+    <span class="tag">质控参考，不计入分数</span>
+    {% else %}
+    <b>本地逐帧测量未采信</b> · {{ face['reason'] or '客观人脸指标不可用' }}
+    {% endif %}
+    {% if face['notes'] %}
+    <ul>{% for n in face['notes'] %}<li>{{ n }}</li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if film %}
+  <div class="film" style="margin-top:16px">
+    {% for fr in film %}
+    <figure class="{{ fr['state'] }}">
+      <img src="/videos/{{ video['id'] }}/asset/frames/{{ fr['name'] }}" alt="关键帧 {{ loop.index }}" loading="lazy">
+      <figcaption>
+        {%- if fr['stamp'] %}{{ fr['stamp'] }}{% else %}帧 {{ '%02d' % loop.index0 }}{% endif -%}
+        {%- if fr['state'] == 'off' %} · 侧脸{% elif fr['state'] == 'miss' %} · 未检出{% endif -%}
+      </figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="rows" style="margin-top:20px">
+    <div>
+      <h3 class="block-title">转写文本（{{ report['provenance']['transcript_chars'] }} 字）</h3>
+      {% if segments %}
+      <div class="transcript">
+        {% for s in segments %}<span class="mono" style="color:var(--teal);font-size:12px">[{{ s['ts'] }}]</span> {{ s['text'] }}
+        {% endfor %}
+      </div>
+      {% elif video['transcript'] %}
+      <div class="transcript">{{ video['transcript'] }}</div>
+      {% else %}
+      <div class="empty">未获得转写文本。</div>
+      {% endif %}
+    </div>
+    <div>
+      <h3 class="block-title">三通道观察</h3>
+      <div class="rows">
+        {% for c in report['channels'] %}
+        <div class="panel">
+          <h3 class="panel-head">{{ {'text':'文本通道','vision':'画面通道','audio':'语音通道'}[c['channel']] }}</h3>
+          <div style="font-size:14.5px;color:var(--ink-2)">{{ c['observations'] or '（无观察记录）' }}</div>
+          <div class="mono" style="font-size:11px;color:var(--ink-3);margin-top:6px">参与维度：{{ c['keys'] | join(', ') or '—' }}</div>
+        </div>
+        {% else %}
+        <div class="empty">无通道记录。</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if usage and usage['calls'] %}
+<section class="sheet" data-reveal="6">
+  <div class="section-title" style="margin-top:0"><h2>用量统计</h2>
+    <span>{{ usage['calls'] }} 次调用 · {{ usage['total'] | n }} token</span></div>
+  <div class="rows">
+    <div>
+      <div class="table-wrap narrow">
+      <table class="sheet-table">
+        <thead><tr><th>阶段</th><th class="num">次数</th><th class="num">输入</th><th class="num">输出</th><th class="num">小计</th></tr></thead>
+        <tbody>
+          {% for s in usage['by_stage'] %}
+          <tr><td>{{ s['name'] }}{% if s['estimated'] %} <span class="tag tag-amber" style="font-size:10px;padding:1px 6px">估算</span>{% endif %}</td>
+            <td class="num">{{ s['calls'] }}</td>
+            <td class="num">{{ s['prompt'] | n }}</td>
+            <td class="num">{{ s['completion'] | n }}</td>
+            <td class="num"><b>{{ s['total'] | n }}</b></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>说明</h3>
+      <ul>
+        <li>「估算」表示该次响应未返回用量字段，按字符数折算，仅用于观察量级。</li>
+        <li>计费以服务方控制台账单为准。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if report['qc'] %}
+<section class="sheet" data-reveal="6">
+  <div class="section-title" style="margin-top:0"><h2>质控记录</h2>
+    <span>{{ report['qc'] | length }} 条 · 影响结果可信度的因素</span></div>
+  <ul class="qc">
+    {% for q in report['qc'] %}<li>{{ q }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if prev %}
+<section class="sheet">
+  <div class="section-title" style="margin-top:0"><h2>与上一次逐项对照</h2>
+    <span>上次：{{ prev['video']['title'] }}（{{ prev['video']['analyzed_at'] | dt }}）</span></div>
+  <div class="table-wrap narrow">
+  <table class="sheet-table">
+    <thead><tr><th>维度</th><th class="num">上次</th><th class="num">本次</th><th class="num">Δ</th></tr></thead>
+    <tbody>
+      {% for d in dims %}
+      {% set before = (prev['dims'].get(d['key']) or {}).get('score') %}
+      <tr>
+        <td>{{ d['name'] }}</td>
+        <td class="num">{{ before if before is not none else '—' }}</td>
+        <td class="num">{{ d['score'] | g }}</td>
+        <td class="num {{ 'delta-up' if before is not none and d['score'] > before else ('delta-down' if before is not none and d['score'] < before else 'delta-flat') }}">
+          {% if before is not none %}{{ '%+g' % (d['score'] - before) }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr><td><b>总分</b></td><td class="num">{{ prev['video']['total'] | g }}</td>
+        <td class="num"><b>{{ report['total'] | g }}</b></td>
+        <td class="num {{ 'delta-up' if report['total'] > prev['video']['total'] else ('delta-down' if report['total'] < prev['video']['total'] else 'delta-flat') }}">
+          {{ '%+g' % (report['total'] - prev['video']['total']) }}</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="sheet" data-reveal="7">
+  <div class="section-title" style="margin-top:0"><h2>改进建议</h2>
+    <span>{{ report['suggestions'] | length }} 条 · 按优先级排 · 整行铺开</span></div>
+  <div class="sugg">
+    {% for s in report['suggestions'] %}
+    <div class="row {{ 'dim-hot' if s['priority'] == 1 }}">
+      <span class="pri">{{ s['priority'] }}</span>
+      <div class="sugg-body">
+        {% if s['dimension'] %}<span class="tag">{{ s['dimension'] }}</span>{% endif %}
+        <div class="sugg-action">{{ s['action'] }}</div>
+        {% if s['example'] %}<div class="dim-text sugg-line">示例：{{ s['example'] }}</div>{% endif %}
+        {% if s['practice'] %}<div class="mono sugg-practice">练习：{{ s['practice'] }}</div>{% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="dim-text">未生成建议。</div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+(function () {
+  var player = document.getElementById('player');
+  if (!player) return;
+  document.querySelectorAll('.time-chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var raw = (chip.getAttribute('data-seek') || '').trim();
+      var m = raw.match(/(\d{1,2}):(\d{2})/);
+      if (!m) return;
+      player.currentTime = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+      player.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      player.play().catch(function () {});
+    });
+  });
+})();
+</script>
+{% endblock %}

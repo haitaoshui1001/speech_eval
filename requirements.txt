@@ -1,0 +1,14 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+jinja2>=3.1
+python-dotenv>=1.0
+requests>=2.32
+# 管理员后台的账号 Excel 模板与批量导入（app/accounts.py）。只用 openpyxl：
+# 本机 pandas 与 NumPy 2.x 存在 ABI 冲突，装了也 import 不了。
+openpyxl>=3.1
+# 微表情的客观测量层（app/face.py）。缺失或被 USE_FACE_METRICS=0 关闭时系统照常工作，
+# 只是不再输出正脸率/低头率等交叉核对指标。
+# 必须锁上界 <5：OpenCV 5.0 起 Haar/HOG 级联与 cv2.ml 移出主 wheel（迁到 contrib），
+# 5.x 的 cv2 里根本没有 CascadeClassifier，装上了也只能降级，反而白白多占内存。
+opencv-python-headless>=4.10,<5

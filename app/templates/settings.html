@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}系统设置 · 演讲辅助评估系统{% endblock %}
+{% block body %}
+{% set lead = (1 if error else 0) + (1 if msg else 0) %}
+
+{% if error %}
+<section class="sheet" data-reveal="1">
+  <div class="alert" style="margin-bottom:0">
+    <b>未保存：</b>{{ error }}
+    <div class="dim-text" style="font-size:13px;margin-top:4px">下面标了「待保存」的格子是你刚填的值，修正后可直接重新提交。</div>
+  </div>
+</section>
+{% endif %}
+{% if msg %}
+<section class="sheet" data-reveal="1">
+  <div class="alert ok" style="margin-bottom:0">{{ msg }}</div>
+</section>
+{% endif %}
+
+<section class="sheet" data-reveal="{{ [lead + 1, 7] | min }}">
+  <div class="kicker">Settings · 系统设置</div>
+  <div class="section-title" style="margin-top:0">
+    <h2>环境配置</h2>
+    <span>{{ field_total }} 项 · 仅管理员可读写</span>
+  </div>
+  <p class="lede" style="font-size:16px">{{ save_note }}</p>
+  <ul class="qc">
+    <li>取值优先级：本页填写（写回 <span class="mono">.env</span>）→ <span class="mono">api_key.txt</span> → 内置默认</li>
+    <li>密钥类输入框永远留空，只显示掩码摘要；不填即不修改，保存后也看不到原文</li>
+    <li>服务标识与网关地址留空即沿用 <span class="mono">api_key.txt</span>，填了才覆盖</li>
+    <li>管理员账号与口令保存后会同步到数据库 <span class="mono">users</span> 表，普通用户不受影响</li>
+  </ul>
+  <p class="dim-text env-file">
+    配置文件：<span class="mono">{{ env_file }}</span>
+    {%- if not env_exists %} · 文件尚不存在，首次保存时自动创建{% endif %}
+  </p>
+</section>
+
+<form method="post" action="/settings" class="env-form">
+  <div class="rows">
+    {% for g in groups %}
+    <section class="sheet" data-reveal="{{ [lead + loop.index + 1, 7] | min }}">
+      <div class="section-title">
+        <h2>{{ g.title }}</h2>
+        <span>{{ g.rows | length }} 项</span>
+      </div>
+      <p class="dim-text env-group-desc">{{ g.desc }}</p>
+
+      {% for row in g.rows %}
+      {% set f = row.field %}
+      {% set ph = ('留空沿用 api_key.txt' if f.file_slot | length else ('默认 ' ~ f.default if f.default else '选填')) %}
+      {% set shown = row.shown if f.kind == 'secret' else row.value %}
+      {% if f.kind == 'bool' %}{% set shown = '启用' if row.value in ('1', 'true', 'on', 'yes') else '关闭' %}{% endif %}
+      {% set on = row.value in ('1', 'true', 'on', 'yes') %}
+      <div class="env-row">
+        <div class="env-id">
+          <label class="env-label" for="env-{{ f.key }}">{{ f.label }}</label>
+          <code class="env-key">{{ f.key }}</code>
+        </div>
+
+        <div class="env-input">
+          {% if f.kind == 'secret' %}
+            <input id="env-{{ f.key }}" name="{{ f.key }}" type="password" autocomplete="new-password"
+                   placeholder="留空表示不修改">
+            {% if f.clearable %}
+            <label class="env-clear" for="clear-{{ f.key }}">
+              <input type="checkbox" id="clear-{{ f.key }}" name="{{ f.key }}__clear" value="1">
+              <span>清除 .env 中的覆盖，改回 api_key.txt</span>
+            </label>
+            {% endif %}
+          {% elif f.kind == 'bool' %}
+            <label class="env-check" for="env-{{ f.key }}">
+              <input type="checkbox" id="env-{{ f.key }}" name="{{ f.key }}" value="1"
+                     {{ 'checked' if on }}>
+              <span>勾选即启用该项</span>
+            </label>
+          {% elif f.kind == 'select' %}
+            <select id="env-{{ f.key }}" name="{{ f.key }}">
+              <option value="" {{ 'selected' if not row.raw }}>不覆盖 · 沿用上游</option>
+              {% for c in f.choices %}
+              <option value="{{ c[0] }}" {{ 'selected' if c[0] == row.raw }}>{{ c[1] }}</option>
+              {% endfor %}
+            </select>
+          {% elif f.kind in ('int', 'float') %}
+            <input id="env-{{ f.key }}" name="{{ f.key }}" type="number" value="{{ row.raw }}"
+                   {% if f.low is not none %}min="{{ f.low | g }}"{% endif %}
+                   {% if f.high is not none %}max="{{ f.high | g }}"{% endif %}
+                   {% if f.step is not none %}step="{{ f.step | g }}"{% endif %}
+                   placeholder="{{ ph }}">
+          {% else %}
+            <input id="env-{{ f.key }}" name="{{ f.key }}" type="text" value="{{ row.raw }}"
+                   placeholder="{{ ph }}" spellcheck="false">
+          {% endif %}
+          {% if f.hint %}<span class="hint">{{ f.hint }}</span>{% endif %}
+        </div>
+
+        <div class="env-state">
+          <div class="env-eff {% if f.kind == 'secret' %}mono{% endif %}">{{ shown or '（未设置）' }}</div>
+          <div class="env-badges">
+            <span class="tag {{ 'tag-amber' if row.pending else 'tag-olive' }}">
+              {{ '待保存' if row.pending else '当前生效' }}</span>
+            <span class="tag {{ 'tag-blue' if row.source == '.env' else ('tag-seal' if row.source == 'api_key.txt' else '') }}">
+              来自 {{ row.source }}</span>
+          </div>
+          {% if f.note %}<div class="env-note">{{ f.note }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+
+  <div class="env-actions">
+    <button class="btn" type="submit">保存并生效</button>
+    <span class="dim-text" style="font-size:13px">保存 = 写回 <span class="mono">.env</span> → 热刷新运行时，进行中任务不受影响。</span>
+  </div>
+</form>
+
+<section class="sheet" data-reveal="{{ [lead + 2, 7] | min }}">
+  <div class="kicker">Prompts · 大模型提示词</div>
+  <div class="section-title" style="margin-top:0">
+    <h2>提示词配置</h2>
+    <span>{{ prompt_total }} 块 · {{ prompt_custom }} 块已自定义</span>
+  </div>
+  <p class="lede" style="font-size:16px">{{ prompt_save_note }}</p>
+  <ul class="qc">
+    <li>花括号占位符由系统在运行时填入（转写文本、维度键名、JSON 结构等），删掉模型就读不到对应材料，保存时会被拦下</li>
+    <li>只有与内置默认<span class="mono">不同</span>的块才写入文件；把文本改回原样，这一块自动回到内置默认</li>
+    <li>整块留空 = 使用内置默认；想一次全恢复，用表单下方的「全部恢复内置默认」</li>
+    <li>提示词与 <span class="mono">.env</span> 分别落盘、分别提交，保存上面那张表单不会动提示词，反之亦然</li>
+    <li>整块清空 = 回到内置默认，<b>不是</b>删掉这段要求；想让系统不再评价某项，请把该块改成一条明确的「不评价」指令</li>
+  </ul>
+  <p class="dim-text env-file">
+    提示词文件：<span class="mono">{{ prompts_file }}</span>
+    {%- if not prompts_exists %} · 文件尚不存在，当前全部使用内置默认，首次保存时自动创建{% endif %}
+  </p>
+</section>
+
+<form method="post" action="/settings/prompts" class="env-form">
+  <div class="rows">
+    {% for g in prompt_groups %}
+    <section class="sheet" data-reveal="{{ [lead + loop.index + 5, 7] | min }}">
+      <div class="section-title">
+        <h2>{{ g.title }}</h2>
+        <span>{{ g.rows | length }} 块</span>
+      </div>
+      <p class="dim-text env-group-desc">{{ g.desc }}</p>
+
+      {% for row in g.rows %}
+      {% set f = row.field %}
+      <div class="env-row">
+        <div class="env-id">
+          <label class="env-label" for="pr-{{ f.key }}">{{ f.label }}</label>
+          <code class="env-key">{{ f.key }}</code>
+          {% if row.tokens | length %}
+          <div class="env-tokens">
+            {% for t in row.tokens %}<span>{{ '{' ~ t ~ '}' }}</span>{% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="env-input">
+          <textarea id="pr-{{ f.key }}" name="{{ f.key }}" spellcheck="false"
+                    rows="{{ [[row.lines + 1, 6] | max, 26] | min }}">{{ row.text }}</textarea>
+          {% if f.hint %}<span class="hint">{{ f.hint }}</span>{% endif %}
+        </div>
+
+        <div class="env-state">
+          <div class="env-eff mono">{{ row.chars }} 字 · {{ row.lines }} 行</div>
+          <div class="env-badges">
+            <span class="tag {{ 'tag-amber' if row.custom else 'tag-olive' }}">
+              {{ '管理员自定义' if row.custom else '内置默认' }}</span>
+            {% if row.missing | length %}<span class="tag tag-seal">缺少占位符</span>{% endif %}
+            {% if row.extra | length and f.strict_braces %}<span class="tag tag-seal">未知占位符</span>{% endif %}
+          </div>
+          {% if row.missing | length %}
+          <div class="env-warn">本块需要 <span class="mono">{{ row.missing | join('、') }}</span>，删了就发不出完整材料，提交会被拒绝。</div>
+          {% endif %}
+          {% if row.extra | length %}
+          <div class="env-warn {% if not f.strict_braces %}soft{% endif %}">
+            {%- if f.strict_braces -%}
+            <span class="mono">{{ row.extra | join('、') }}</span> 不是本块可用的占位符，提交会被拒绝。
+            {%- else -%}
+            <span class="mono">{{ row.extra | join('、') }}</span> 不是系统占位符，会原样发给模型。
+            {%- endif -%}
+          </div>
+          {% endif %}
+          {% if f.note %}<div class="env-note">{{ f.note }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+
+  <div class="env-actions">
+    <button class="btn" type="submit">保存提示词</button>
+    <span class="dim-text" style="font-size:13px">任何一块校验不过就整体不写盘，填的内容会退回本页，改完再提交即可。</span>
+  </div>
+</form>
+
+<form class="inline-form" method="post" action="/settings/prompts/reset">
+  <div class="env-actions loose">
+    <button class="btn ghost small" type="submit">全部恢复内置默认</button>
+    <span class="dim-text" style="font-size:13px">
+      清掉落盘的覆盖，代码里的内置默认不动。
+      {%- if prompt_custom %} 当前有 {{ prompt_custom }} 块自定义内容会被还原。{% endif %}
+    </span>
+  </div>
+</form>
+
+<section class="sheet" data-reveal="7">
+  <div class="panel-head">
+    <h3 style="margin:0;font-size:15px;letter-spacing:.12em">不经过页面的两种操作</h3>
+  </div>
+  <div class="env-actions" style="margin-top:12px">
+    <form class="inline-form" method="post" action="/settings/reload">
+      <button class="btn ghost small" type="submit">按磁盘上的 .env 重新加载</button>
+    </form>
+    <span class="dim-text" style="font-size:13px">手工编辑过文件、但页面显示的还是旧值时点这里。</span>
+    <a class="btn ghost small" href="/health">查看运行时健康信息</a>
+  </div>
+</section>
+{% endblock %}

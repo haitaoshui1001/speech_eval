@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}演讲辅助评估系统 · 按标准逐维度打分{% endblock %}
+{% block body %}
+{% set admin_hint = '管理员入口：与用户走同一个登录页。用管理员账号登录后，导航栏才会出现「管理后台」与「系统设置」。' %}
+<section class="hero" data-reveal="1">
+  <div class="kicker">English Speech · Rubric-based Review</div>
+  <h1>把一段演讲录像，<br>拆成 <em>{{ rubric.dimensions | length }} 个维度</em>的可读评语。</h1>
+  <p class="lede">上传演讲视频，<em>多维度独立打分</em>；分数由确定性规则聚合，
+    证据必须回指到原句或画面时间点，最后才生成优点、缺点、改进建议与总结。</p>
+  <div class="rules">
+    <span class="tag tag-ink">转录 ASR</span>
+    <span class="tag">文本通道</span>
+    <span class="tag">画面通道</span>
+    <span class="tag">语音通道</span>
+    <span class="tag tag-seal">证据核验</span>
+  </div>
+  <div class="row-actions" style="margin-top:26px">
+    <a class="btn" href="/login">登录进入系统</a>
+    <a class="btn ghost" href="/guide">评分标准与说明</a>
+    <a class="btn ghost" href="/login?notice={{ admin_hint | urlencode }}">管理员入口</a>
+  </div>
+  <p class="dim-text" style="margin-top:12px">账号由管理员统一开通，不支持自助注册。</p>
+</section>
+
+<section class="ledger" data-reveal="2">
+  <div><span>评分维度</span><b>{{ rubric.dimensions | length }}</b></div>
+  <div><span>满分</span><b>{{ rubric.total | round | int }}</b></div>
+  <div><span>评判通道</span><b style="font-size:15px">文本 · 画面 · 语音</b></div>
+  <div><span>转录方式</span><b style="font-size:15px">{{ '本地引擎' if asr_engine == 'whisper' else '云端引擎' }}</b></div>
+</section>
+{% endblock %}
