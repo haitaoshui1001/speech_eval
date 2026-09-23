@@ -252,6 +252,7 @@ def dashboard(request: Request, msg: str = ""):
     done = [v for v in videos if v["status"] == "done"]
     return render(request, "dashboard.html", nav="dashboard", videos=videos, done=done,
                   msg=msg, max_mb=settings.max_video_bytes // (1024 * 1024),
+                  compress_mb=settings.compress_target_bytes // (1024 * 1024),
                   recurring=db.recurring_issues(user["id"]),
                   quota=db.upload_quota(user["id"]),
                   usage=db.token_usage(user["id"]))
@@ -1001,6 +1002,10 @@ def _health_payload(web_threads: int) -> dict:
                                  else "云端 qwen3-asr-flash"),
             "whisper_model_size": settings.whisper_model_size,
             "ffmpeg": bool(shutil.which("ffmpeg")),
+            # 压缩是否真的会生效：0 表示关，非 0 时超过该体积就要靠 ffmpeg 两遍编码。
+            # 与上面的 ffmpeg 探测放在一起，是因为「目标设了但没装 ffmpeg」只会以报错收场。
+            "compress_target_mb": settings.compress_target_bytes // (1024 * 1024),
+            "compress_timeout": settings.compress_timeout,
             "face_metrics": face_mod.available(),
             # 可选层降级时说清为什么降级：装到不兼容的 opencv 大版本是真实踩过的坑，
             # 光给一个 false 只会让人去翻 traceback。

@@ -349,11 +349,17 @@ print("       ffmpeg   :", d.get("ffmpeg"), "   人脸层:", d.get("face_metrics
       ("（%s）" % d.get("face_metrics_note") if d.get("face_metrics_note") else ""))
 print("       ASR      :", d.get("asr_engine_label"))
 print("       评分标准 :", d.get("rubric"))
+print("       自动压缩 :", ("目标 %s MB / 单遍超时 %s 秒"
+      % (d.get("compress_target_mb"), d.get("compress_timeout"))
+      if d.get("compress_target_mb") else "未启用（COMPRESS_TARGET_MB=0）"))
 print("       并发     : analyzers=%s pool=%s running=%s llm=%s web_threads=%s"
       % (c.get("analyzers"), c.get("pool_size"), c.get("running"),
          c.get("llm_requests"), c.get("web_threads")))
 if not d.get("ffmpeg"):
     print("       !! ffmpeg 不在 PATH，分析会失败：apt-get install -y ffmpeg")
+    if d.get("compress_target_mb"):
+        print("       !! 且 COMPRESS_TARGET_MB=%s 已启用，超过该体积的视频会在压缩这一步报错"
+              % d.get("compress_target_mb"))
 if d.get("mode") != "real":
     print("       !! 当前不是 real 模式，产出的是演示数据")
 if str(c.get("web_threads")) != "32":

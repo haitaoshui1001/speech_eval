@@ -236,8 +236,14 @@ ENV_GROUPS: tuple[tuple[str, str, tuple[EnvField, ...]], ...] = (
         EnvField("ADMIN_PASSWORD", "管理员口令", "secret", "admin_password",
                  "留空表示不修改；至少 6 位。", "同步数据库，普通用户不受影响"),
         EnvField("MAX_VIDEO_MB", "单个视频上限（MB）", "int", "max_video_bytes",
-                 "上传时校验。", "影响下一次上传", default="500", low=1, high=102400,
+                 "上传时校验，超过直接拒收。", "影响下一次上传", default="500", low=1, high=102400,
                  scale=1024 * 1024),
+        EnvField("COMPRESS_TARGET_MB", "自动压缩目标（MB）", "int", "compress_target_bytes",
+                 "上传后可以超过这个体积，分析前会用 ffmpeg 两遍编码压到目标以内；填 0 表示不压缩。",
+                 "影响下一次分析", default="50", low=0, high=102400, scale=1024 * 1024),
+        EnvField("COMPRESS_TIMEOUT", "压缩超时（秒）", "int", "compress_timeout",
+                 "每一遍编码的上限时间，超时保留原文件并报错。", "影响新任务",
+                 default="1800", low=60, high=21600),
         EnvField("USER_UPLOAD_LIMIT", "每人上传次数", "int", "user_upload_limit",
                  "新账号默认可上传的视频个数，用完即止；管理员可在后台单独重置或放行。",
                  "影响新账号与未单独设置的账号", default="5", low=1, high=10000),
@@ -286,6 +292,10 @@ class Settings:
     admin_username: str = field(default_factory=lambda: os.getenv("ADMIN_USERNAME", "admin"))
     admin_password: str = field(default_factory=lambda: os.getenv("ADMIN_PASSWORD", "admin123"))
     max_video_bytes: int = field(default_factory=lambda: _int("MAX_VIDEO_MB", 500) * 1024 * 1024)
+    # 上传上限与压缩目标是两件事：上限决定「收不收」，目标决定「收完存多大」。
+    # 只留上限的话，50MB 这种严格阈值会把大文件直接拒之门外，永远轮不到压缩。
+    compress_target_bytes: int = field(default_factory=lambda: _int("COMPRESS_TARGET_MB", 50) * 1024 * 1024)
+    compress_timeout: int = field(default_factory=lambda: _int("COMPRESS_TIMEOUT", 1800))
     user_upload_limit: int = field(default_factory=lambda: _int("USER_UPLOAD_LIMIT", 5))
     session_days: int = field(default_factory=lambda: _int("SESSION_DAYS", 7))
 

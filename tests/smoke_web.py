@@ -728,9 +728,10 @@ def main() -> int:
         adm.post("/login", data={"username": settings.admin_username, "password": settings.admin_password,
                                  "next": "/settings"}, follow_redirects=False)
         secret = settings.api_key
-        body = page(adm, "/settings", "系统设置", "环境配置", "28 项", "DASHSCOPE_API_KEY",
+        body = page(adm, "/settings", "系统设置", "环境配置", "30 项", "DASHSCOPE_API_KEY",
                     "保存并生效", "api_key.txt", "来自",
                     "并发分析数", "在线请求并发数", "网页工作线程数",
+                    "自动压缩目标", "压缩超时",
                     absent=((secret,) if len(secret) > 8 else ()),
                     label="设置页渲染全部配置项")
         check('type="password"' in body and "留空表示不修改" in body, "密钥框不明文回显")
@@ -819,6 +820,53 @@ def main() -> int:
         check(h["ok"] and h["mode"] == "mock" and h["models"]["chat"] and h["asr_engine"],
               "健康接口反映当前运行时设置", f"{h['mode']} / {h['models']['chat']}")
         adm.close()
+
+        # ------------------------------------------------------------ 大文件自动压缩（真实 ffmpeg 两遍编码）
+        keep_cmp = settings.compress_target_bytes
+        raw_size = SAMPLE.stat().st_size
+        adm3 = TestClient(app)
+        adm3.post("/login", data={"username": settings.admin_username,
+                                  "password": settings.admin_password, "next": "/admin"},
+                  follow_redirects=False)
+        try:
+            settings.compress_target_bytes = 1024 * 1024        # 样本约 3 MB，必然触发压缩
+            ce = adm3.post("/admin/users/create", data={"username": "erin", "password": "pw-erin-123",
+                                                       "display_name": "小珂", "role": "user"},
+                           follow_redirects=False)
+            check(ce.status_code == 303, "为压缩用例再开一个普通用户", str(ce.status_code))
+            cw = TestClient(app)
+            cl = cw.post("/login", data={"username": "erin", "password": "pw-erin-123",
+                                         "next": "/dashboard"}, follow_redirects=False)
+            check(cl.status_code == 303, "压缩用例账号可登录", str(cl.status_code))
+            page(cw, "/dashboard", "超过 1 MB 自动压缩", label="上传表单说明大文件会自动压缩")
+            cw.close()
+            t0 = time.time()
+            vc = upload(adm3, "大文件自动压缩")
+            sc = wait_done(adm3, vc)
+            check(sc.startswith("done"), "超过压缩目标的视频可完整走完分析", f"{sc} / 耗时 {time.time() - t0:.0f}s")
+            rowc = db.get_video(vc)
+            check(rowc["orig_size"] == raw_size and 200 * 1024 < rowc["size"] <= 1024 * 1024,
+                  "原始体积入库且落盘文件已压到 1 MB 以内",
+                  f"{raw_size / 1048576:.1f} MB → {rowc['size'] / 1048576:.1f} MB")
+            saved = Path(rowc["path"])
+            check(saved.exists() and saved.stat().st_size == rowc["size"]
+                  and saved.suffix.lower() == ".mp4", "path 指向压缩后的新 mp4", saved.name)
+            check("原始文件" in rowc["compress_note"] and "两遍编码" in rowc["compress_note"],
+                  "压缩说明记录前后体积与编码方式", rowc["compress_note"][:46] + "…")
+            check(not list(settings.video_dir.glob("*compressing*")),
+                  "两遍编码的中间文件未残留", "、".join(p.name for p in settings.video_dir.iterdir())[:90])
+            page(adm3, f"/videos/{vc}", "压缩前", "两遍编码", "分项得分",
+                 label="报告页标注压缩前体积并把压缩写进质控记录")
+            db.update_video(vc, status="analyzing", stage="两遍编码压缩 5%", progress=5)
+            page(adm3, f"/videos/{vc}", "自动压缩到目标体积", "已自动压缩", "两遍编码压缩",
+                 label="进度页含压缩步骤并显示原始体积")
+            db.update_video(vc, status="done", stage="完成", progress=100)
+            page(adm3, "/admin", "大文件自动压缩", "压缩前", label="后台列表标出被压缩过的视频")
+            rc = adm3.get(f"/videos/{vc}/play", headers={"Range": "bytes=0-1023"})
+            check(rc.status_code == 206 and len(rc.content) == 1024, "压缩后仍可分段播放", str(rc.status_code))
+        finally:
+            settings.compress_target_bytes = keep_cmp
+            adm3.close()
 
         # ------------------------------------------------------------ 管理员删号（放在最后，避免级联删掉越权目标）
         client.post("/logout")

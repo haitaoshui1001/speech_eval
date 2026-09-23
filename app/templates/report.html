@@ -17,7 +17,7 @@
       <h1 style="font-size:clamp(26px,4vw,40px);margin:0 0 6px">{{ video['title'] }}</h1>
       <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">
         {{ video['topic'] or '未填写题目' }} · {{ video['duration'] | ts }} ·
-        {{ video['width'] }}×{{ video['height'] }} · {{ video['size'] | size }} ·
+        {{ video['width'] }}×{{ video['height'] }} · {{ video['size'] | size }}{% if video['orig_size'] %}（压缩前 {{ video['orig_size'] | size }}）{% endif %} ·
         分析于 {{ video['analyzed_at'] | dt }}
       </div>
     </div>

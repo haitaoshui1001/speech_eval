@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS videos (
     api_calls INTEGER NOT NULL DEFAULT 0,
     token_detail TEXT NOT NULL DEFAULT '{}',
     frontal_ratio REAL,
+    orig_size INTEGER,
+    compress_note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     analyzed_at TEXT
@@ -139,6 +141,10 @@ _EXTRA_VIDEO_COLUMNS = {
     # 正脸率：可空。NULL 表示「没测或测量未通过门控」，和测出 0% 是两回事，
     # 所以不能给 DEFAULT 0，否则趋势图会把历史空白点画成真实的零。
     "frontal_ratio": "REAL",
+    # 自动压缩痕迹：orig_size 可空（NULL = 没压过），compress_note 存给人看的说明。
+    # 原件在压缩成功后即被替换删除，这两个字段是唯一能回溯「原来多大」的地方。
+    "orig_size": "INTEGER",
+    "compress_note": "TEXT NOT NULL DEFAULT ''",
 }
 
 # 上传配额同样要补列：upload_limit 可空，NULL 表示「跟随全局 USER_UPLOAD_LIMIT」，

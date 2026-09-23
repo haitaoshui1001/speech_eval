@@ -191,7 +191,9 @@
           {% endif %}
         </td>
         <td class="num">{{ v['duration'] | ts }}</td>
-        <td class="num">{{ v['size'] | size }}</td>
+        <td class="num">{{ v['size'] | size }}
+          {%- if v['orig_size'] %}<div class="mono" style="font-size:10.5px;color:var(--olive)"
+            title="{{ v['compress_note'] }}">压缩前 {{ v['orig_size'] | size }}</div>{% endif %}</td>
         <td class="num mono" style="font-size:12px">{{ v['created_at'] | dt }}</td>
         <td class="num">
           {% if v['status'] == 'done' and v['total'] is not none %}

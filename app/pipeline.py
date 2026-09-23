@@ -12,7 +12,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import analyze, db, face as face_mod, media, transcribe
+from . import analyze, compress, db, face as face_mod, media, transcribe
 from .analyze import Aggregated, TimingCheck
 from .config import settings
 from .qwen import QwenClient, QwenError
@@ -111,17 +111,54 @@ def _run_channel(client: QwenClient, rubric: Rubric, name: str, *, transcript: s
 
 
 # --------------------------------------------------------------- 主流程
+def _compress_stage(video_id: int, path: Path, notes: list[str]) -> Path:
+    """体积超过压缩目标时先压再分析（进度 4–7%），返回真正要分析的文件路径。
+
+    压缩放在流水线而不是上传请求里，是因为两遍编码在两核服务器上要跑几分钟，
+    放进 HTTP 请求必然超时；这里失败会照常冒到 _worker，原始文件已被 compress 保住。
+    非 MP4 原件压完会换成 .mp4 落盘，所以路径必须回传给后续抽帧抽音。
+    """
+    size = path.stat().st_size
+    if not compress.needs_compress(size):
+        return path
+    db.update_video(video_id, orig_size=size)
+    db.set_progress(video_id, "queued", f"压缩视频（{compress.human(size)} → 目标 {compress.target_hint()}）", 4)
+    info = media.probe(path)
+    last = {"p": 0}
+
+    def report(pct: int, phase: str) -> None:
+        # ffmpeg 每秒吐几十行进度，只在整数百分比变化时写库，避免刷爆 SQLite。
+        if pct == last["p"]:
+            return
+        last["p"] = pct
+        db.set_progress(video_id, "queued", f"{phase} {pct}%", 4 + int(pct * 3 / 100))
+
+    res = compress.compress(path, info, on_progress=report)
+    if res is None:
+        return path
+    fields = {"size": res.size, "compress_note": res.note}
+    if res.renamed and res.path:
+        fields["path"] = str(res.path)
+        fields["filename"] = res.path.name
+    db.update_video(video_id, **fields)
+    notes.append(res.note)
+    return res.path or path
+
+
 def run_analysis(video_id: int, rubric: Rubric = DEFAULT_RUBRIC) -> dict:
     video = db.get_video(video_id)
     if video is None:
         raise RuntimeError(f"视频 {video_id} 不存在")
 
-    out_dir = _artifact_dir(video_id)
-    db.set_progress(video_id, "analyzing", "抽取音视频与关键帧", 8)
-
     path = Path(video["path"])
     if not path.exists():
         raise RuntimeError(f"视频文件丢失：{path}")
+
+    early_notes: list[str] = []
+    path = _compress_stage(video_id, path, early_notes)
+
+    out_dir = _artifact_dir(video_id)
+    db.set_progress(video_id, "analyzing", "抽取音视频与关键帧", 8)
 
     info = media.probe(path)
     duration = info.duration
@@ -144,7 +181,7 @@ def run_analysis(video_id: int, rubric: Rubric = DEFAULT_RUBRIC) -> dict:
     real = settings.real_mode
     client = QwenClient()
     note = f"{video['id']}-{video['title']}"
-    notes: list[str] = []
+    notes: list[str] = list(early_notes)
 
     db.set_progress(video_id, "transcribing", "转录语音", 22)
     client.mark("转录 ASR")

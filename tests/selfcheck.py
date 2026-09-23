@@ -261,7 +261,7 @@ def main() -> int:
                        "USE_AUDIO_CHANNEL=1\nMAX_VIDEO_MB=500\n", encoding="utf-8")
     cfg.ENV_FILE = scratch
     try:
-        results.append(ok("设置项声明表覆盖 28 个键", len(cfg.ENV_FIELDS) == 28, f"{len(cfg.ENV_FIELDS)} 项"))
+        results.append(ok("设置项声明表覆盖 30 个键", len(cfg.ENV_FIELDS) == 30, f"{len(cfg.ENV_FIELDS)} 项"))
         fields = {f.key: f for f in cfg.ENV_FIELDS}
         results.append(ok("并发三键已声明且默认值够 10 人同时用",
                           fields["MAX_ANALYZERS"].default == "10"
@@ -721,6 +721,158 @@ def main() -> int:
                           schema=prm.get("qa_review_schema"))
     results.append(ok("点评块渲染后不残留占位符", "{qa}" not in r_render and "{schema}" not in r_render))
     db.save_questions(vid_qa, uid_qa, ["最终一题", "最终二题", "最终三题"])
+
+    print("\n== 13. 视频自动压缩：档位选择、进度解析与落盘 ==")
+    from app import compress as zc
+    keep_cmp = (settings.compress_target_bytes, settings.compress_timeout)
+    settings.compress_timeout = 600
+    mb = 1024 * 1024
+    zc_dir = settings.data_dir / "_compress_probe"
+    zc_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        settings.compress_target_bytes = 0
+        results.append(ok("压缩目标填 0 即整段关闭自动压缩", not zc.needs_compress(10 ** 10)))
+        settings.compress_target_bytes = 50 * mb
+        results.append(ok("恰好等于目标不压，超出 1 字节才压",
+                          not zc.needs_compress(50 * mb) and zc.needs_compress(50 * mb + 1)))
+        results.append(ok("目标提示按 MB 显示", zc.target_hint() == "50 MB", zc.target_hint()))
+        results.append(ok("横屏按短边降档", zc.cap_short_edge(1920, 1080, 720) == (1280, 720),
+                          str(zc.cap_short_edge(1920, 1080, 720))))
+        results.append(ok("竖屏同样按短边降档（长边排档会永远降不下来）",
+                          zc.cap_short_edge(1080, 1920, 720) == (720, 1280),
+                          str(zc.cap_short_edge(1080, 1920, 720))))
+        results.append(ok("小分辨率原样保留（只缩不放）", zc.cap_short_edge(640, 360, 1080) == (640, 360)))
+        results.append(ok("宽高向下取偶数满足 yuv420p",
+                          all(v % 2 == 0 for v in zc.cap_short_edge(1079, 1921, 540)),
+                          str(zc.cap_short_edge(1079, 1921, 540))))
+
+        def _mi(duration, width, height, audio=True, fps=25.0):
+            return media.MediaInfo(duration=duration, width=width, height=height,
+                                   has_audio=audio, fps=fps)
+
+        easy = zc.pick_plan(_mi(300.0, 1280, 720), 50 * mb)
+        results.append(ok("码率宽裕时保住原始分辨率", (easy.width, easy.height) == (1280, 720),
+                          f"{easy.width}x{easy.height} / {easy.video_kbps}kbps"))
+        tight = zc.pick_plan(_mi(3600.0, 1920, 1080, fps=30.0), 50 * mb)
+        results.append(ok("码率不够才降分辨率（1 小时 1080p 压到 50MB）",
+                          tight.short_edge < 1080 and tight.video_kbps >= zc._MIN_VIDEO_KBPS,
+                          f"降到 {tight.width}x{tight.height} / {tight.video_kbps}kbps"))
+        results.append(ok("档位最低到 480p 为止", tight.short_edge >= zc.LADDER[-1], f"短边 {tight.short_edge}"))
+        budget_kbps = 50 * mb * zc.HEADROOM * 8 / 300 / 1000
+        results.append(ok("码率预算先扣音频再分给视频",
+                          easy.audio_kbps == zc.AUDIO_KBPS
+                          and 0 <= budget_kbps - (easy.video_kbps + easy.audio_kbps) < 1,
+                          f"预算 {budget_kbps:.0f}k = 视频 {easy.video_kbps}k + 音频 {easy.audio_kbps}k"))
+        results.append(ok("无声视频不预留音频码率",
+                          zc.pick_plan(_mi(60.0, 640, 360, audio=False), 5 * mb).audio_kbps == 0))
+        results.append(ok("异常帧率回落到 25fps（避免除零与极端 bpp）",
+                          zc.pick_plan(_mi(60.0, 640, 360, fps=0.0), 5 * mb).fps == 25.0))
+        try:
+            zc.pick_plan(_mi(0.0, 640, 360), 5 * mb)
+            zero_bad = "没报错"
+        except RuntimeError as exc:
+            zero_bad = "" if "时长探测失败" in str(exc) else str(exc)[:40]
+        results.append(ok("时长探测失败时报错而不是算出无穷码率", not zero_bad, zero_bad))
+
+        results.append(ok("-progress 行按微秒换算已编码秒数",
+                          abs((zc._progress_seconds("out_time_us=12500000") or 0) - 12.5) < 1e-6))
+        results.append(ok("out_time_ms 也按微秒读（ffmpeg 历史遗留命名）",
+                          abs((zc._progress_seconds("out_time_ms=12500000") or 0) - 12.5) < 1e-6))
+        results.append(ok("无关行、非数字、负值、未知单位一律忽略",
+                          all(zc._progress_seconds(t) is None for t in
+                              ("frame=  123", "out_time_us=abc", "out_time_us=-1", "out_time_code=5"))))
+
+        zclip = zc_dir / "gen.mp4"
+        zgen = subprocess.run(
+            [media.ffmpeg_exe(), "-y", "-v", "error",
+             "-f", "lavfi", "-i", "testsrc2=s=640x360:d=8:r=25",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=8",
+             "-c:v", "libx264", "-b:v", "4000k", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-shortest", str(zclip)],
+            capture_output=True, text=True, timeout=300)
+        raw_size = zclip.stat().st_size if zgen.returncode == 0 and zclip.exists() else 0
+        results.append(ok("压缩夹具（4Mbps 高码率 8 秒片）可生成", raw_size > 1_500_000,
+                          f"{raw_size / mb:.1f} MB" if raw_size else " ".join(zgen.stderr.split())[:120]))
+        if raw_size:
+            settings.compress_target_bytes = raw_size // 3
+            zinfo = media.probe(zclip)
+            ticks: list[tuple[int, str]] = []
+            res = zc.compress(zclip, zinfo, on_progress=lambda p, phase: ticks.append((p, phase)))
+            after = media.probe(zclip)
+            results.append(ok("超过目标的视频真实压到线内并原地替换",
+                              res is not None and res.size <= raw_size // 3
+                              and zclip.stat().st_size == res.size,
+                              f"{raw_size / mb:.1f} MB → {(res.size / mb if res else 0):.1f} MB"))
+            results.append(ok("压完仍可正常探测（时长与音轨都在）",
+                              res is not None and after.duration > 6 and after.has_audio,
+                              f"{after.duration:.1f}s / 音频 {after.has_audio}"))
+            results.append(ok("码率够用时不牺牲分辨率",
+                              res is not None and (after.width, after.height) == (zinfo.width, zinfo.height),
+                              f"{zinfo.width}x{zinfo.height} → {after.width}x{after.height}"))
+            phases = {p for _, p in ticks}
+            results.append(ok("进度覆盖分析一遍与编码一遍并走到 100%",
+                              bool(ticks) and max(t for t, _ in ticks) == 100
+                              and len(phases) == 2, f"{len(ticks)} 次回调 · " + "、".join(sorted(phases))))
+            results.append(ok("压缩说明写清前后体积与码率", res is not None
+                              and "原始文件" in res.note and "两遍编码" in res.note
+                              and f"{res.plan.video_kbps}kbps" in res.note, (res.note[:60] + "…") if res else "")
+                          )
+            results.append(ok("临时文件与两遍日志全部清理",
+                              not list(zc_dir.glob("*compressing*")) and not list(zc_dir.glob("*.pass*")),
+                              " ".join(p.name for p in zc_dir.iterdir())))
+
+            mov = zc_dir / "phone.MOV"
+            mov.write_bytes(zclip.read_bytes())
+            settings.compress_target_bytes = max(1, mov.stat().st_size // 2)
+            res_mov = zc.compress(mov, media.probe(mov))
+            results.append(ok("非 MP4 原件压完转封并改名成 .mp4",
+                              res_mov is not None and res_mov.renamed
+                              and res_mov.path.name == "phone.mp4" and res_mov.path.exists()
+                              and not mov.exists(),
+                              res_mov.path.name if res_mov else "未改名"))
+
+        fake = zc_dir / "fake.mp4"
+        settings.compress_target_bytes = 1_000_000
+        fake_info = _mi(8.0, 640, 360)
+        real_encode, zc._encode = zc._encode, None
+        try:
+            def _writes(n: int):
+                def _inner(src, dst, plan, passlog, on_progress=None):
+                    dst.write_bytes(b"\0" * n)
+                return _inner
+
+            zc._encode = _writes(1_500_000)
+            fake.write_bytes(b"\0" * 2_000_000)
+            try:
+                zc.compress(fake, fake_info)
+                msg = "没报错"
+            except RuntimeError as exc:
+                msg = "" if "未能压到目标" in str(exc) else str(exc)[:40]
+            results.append(ok("两遍后仍超标：明确报错且原件一字未动",
+                              not msg and fake.stat().st_size == 2_000_000, msg))
+
+            zc._encode = _writes(2_500_000)
+            res_worse = zc.compress(fake, fake_info)
+            results.append(ok("压完反而更大时放弃替换（返回 None 而非报错）",
+                              res_worse is None and fake.stat().st_size == 2_000_000))
+            results.append(ok("失败路径同样不留半成品与日志",
+                              not list(zc_dir.glob("*compressing*")) and not list(zc_dir.glob("*.pass*"))))
+        finally:
+            zc._encode = real_encode
+
+        uid_z = db.get_user_by_name("alice")["id"]
+        vid_z = db.create_video(uid_z, "压缩落库", "z.mp4", "z.mp4", 2_000_000)
+        db.update_video(vid_z, orig_size=2_000_000, compress_note="已压到 1 MB")
+        row_z = db.get_video(vid_z)
+        results.append(ok("原始体积与压缩说明可落库读回",
+                          row_z["orig_size"] == 2_000_000 and row_z["compress_note"] == "已压到 1 MB"))
+        results.append(ok("没压过的视频 orig_size 为空（区别于 0）",
+                          db.get_video(db.create_video(uid_z, "未压缩", "n.mp4", "n.mp4", 1))["orig_size"] is None))
+        results.append(ok("压缩目标与超时已在设置页声明",
+                          {"COMPRESS_TARGET_MB", "COMPRESS_TIMEOUT"} <= {f.key for f in cfg.ENV_FIELDS}))
+    finally:
+        settings.compress_target_bytes, settings.compress_timeout = keep_cmp
+        shutil.rmtree(zc_dir, ignore_errors=True)
 
     print("\n" + "=" * 56)
     passed = sum(1 for r in results if r)
