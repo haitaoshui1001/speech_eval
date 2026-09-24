@@ -53,6 +53,13 @@ DOCS = [
         "short": "部署手册",
         "desc": "阿里云 ECS 2 vCPU / 2 GiB 单机上线与运维",
     },
+    {
+        "src": Path("docs/方案-版本指纹与压缩闸门.md"),
+        "out": "方案-版本指纹与压缩闸门.html",
+        "title": "演讲评分系统 · 版本指纹与压缩闸门方案",
+        "short": "方案",
+        "desc": "待决策：发布链路版本防呆 + 长视频压缩可行性闸门",
+    },
 ]
 
 # 生成时把 Markdown 占位符换成实际值；Markdown 源保持占位符
@@ -326,6 +333,7 @@ def page_shell(doc: dict, body: str, toc: str, subs: dict, built: str) -> str:
         .replace("@@META@@", meta)
         .replace("@@NAV@@", " ".join(nav))
         .replace("@@ZIP@@", html_mod.escape(zip_name))
+        .replace("@@DOC_COUNT@@", str(len(DOCS)))
         .replace("@@TOC@@", toc)
         .replace("@@BODY@@", body)
     )
@@ -658,7 +666,7 @@ body.showallsrc figure.mmd .mmdsrc{display:block}
   <span class="tools">
     <button type="button" class="btn" id="btn-download">下载本页 HTML</button>
     <button type="button" class="btn ghost" id="btn-expand">展开全部源码</button>
-    <a class="btn ghost" href="@@ZIP@@" download="@@ZIP@@">打包下载（2 份 HTML）</a>
+    <a class="btn ghost" href="@@ZIP@@" download="@@ZIP@@">打包下载（@@DOC_COUNT@@ 份 HTML）</a>
     <button type="button" class="btn ghost" id="btn-print">打印 / 存 PDF</button>
   </span>
 </div></header>
