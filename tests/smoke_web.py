@@ -111,7 +111,7 @@ def env_form(overrides: dict | None = None, uncheck: tuple[str, ...] = ()) -> di
 
 
 def prompt_form(overrides: dict | None = None) -> dict:
-    """按页面提交规则拼一份提示词表单：整份 19 块一起提交，未改的块回填当前生效文本。"""
+    """按页面提交规则拼一份提示词表单：整份全部块一起提交，未改的块回填当前生效文本。"""
     form = {f.key: prm.get(f.key) for f in prm.PROMPT_FIELDS}
     form.update(overrides or {})
     return form
@@ -177,6 +177,8 @@ def main() -> int:
               "/health 暴露全站 token 聚合")
         check(isinstance(health.get("face_metrics"), bool),
               "/health 说明客观人脸测量层可用与否", str(health.get("face_metrics")))
+        check(isinstance(health.get("version"), str) and health["version"],
+              "/health 带代码指纹，升级验收可闭环", health.get("version"))
         conc = health.get("concurrency")
         check(isinstance(conc, dict) and {"analyzers", "pool_size", "running", "llm_requests",
                                         "llm_in_flight", "web_threads"} <= set(conc),
@@ -294,33 +296,230 @@ def main() -> int:
 
         # ------------------------------------------------------------ 导师提问
         qa_body = page(client, f"/videos/{v1}", "导师提问", 'name="answer_1"',
-                       'name="answer_2"', 'name="answer_3"', 'id="qa"',
-                       absent=("生成导师提问",), label="分析完成后报告页直接展示 3 道待作答题")
+                       'name="answer_2"', 'id="qa"',
+                       absent=("生成导师提问", "name=\"answer_3\""), label="分析完成后报告页直接展示 2 道待作答的英文题")
         check("等待作答" in qa_body, "未作答时区块标注等待作答")
-        check('class="qa-list"' in qa_body and qa_body.count('class="qa-item"') == 3,
-              "列表按题序渲染 3 条")
+        check('class="qa-list"' in qa_body and qa_body.count('class="qa-item"') == 2,
+              "列表按题序渲染 2 条")
         dup = client.post(f"/videos/{v1}/qa/generate", follow_redirects=False)
         check(dup.status_code == 303 and "msg=" in dup.headers["location"]
               and "已存在" in unquote(dup.headers["location"]),
               "重复生成会给出已存在回执", dup.headers.get("location", ""))
         miss = client.post(f"/videos/{v1}/qa/answer",
-                           data={"answer_1": "只答第一题。", "answer_2": "", "answer_3": "第三题。"},
+                           data={"answer_1": "只答第一题。", "answer_2": ""},
                            follow_redirects=False)
         check(miss.status_code == 303 and "都回答" in unquote(miss.headers["location"]),
               "缺答时不入库并给出提示", miss.headers.get("location", ""))
         check(all(not q["answer"] for q in db.get_questions(v1)), "缺答提交未污染已有作答")
         full = client.post(f"/videos/{v1}/qa/answer",
-                           data={"answer_1": "第一题作答。", "answer_2": "第二题作答。",
-                                 "answer_3": "第三题作答。"},
+                           data={"answer_1": "第一题作答。", "answer_2": "第二题作答。"},
                            follow_redirects=False)
         check(full.status_code == 303 and "点评" in unquote(full.headers["location"]),
-              "齐答三题后跳回报告页", full.headers.get("location", ""))
+              "齐答两题后跳回报告页", full.headers.get("location", ""))
         answered = page(client, f"/videos/{v1}", "已作答", 'class="qa-comment"',
                         "第一题作答。", label="提交后报告页回填作答并展示简评")
-        check(answered.count('class="qa-comment"') == 3, "每题都渲染出一条简评")
+        check(answered.count('class="qa-comment"') == 2, "每题都渲染出一条简评")
         saved = db.get_questions(v1)
-        check(len(saved) == 3 and all(q["status"] == "answered" and q["ai_comment"] for q in saved),
+        check(len(saved) == 2 and all(q["status"] == "answered" and q["ai_comment"] for q in saved),
               "作答与简评一并入库", str([q["status"] for q in saved]))
+
+        # ------------------------------------------------ 改稿确认门与朗读（mock 行为）
+        prop = client.post(f"/videos/{v1}/script/propose", data={"glossary": ""},
+                           follow_redirects=False)
+        check(prop.status_code == 303 and "在线模式" in unquote(prop.headers["location"]),
+              "mock 下改稿建议被拒并提示需在线模式",
+              unquote(prop.headers.get("location", ""))[:60])
+        dec = client.post(f"/videos/{v1}/script/decide", data={}, follow_redirects=False)
+        check(dec.status_code == 303 and "请先" in unquote(dec.headers["location"]),
+              "无建议时提交确认被拦下", unquote(dec.headers.get("location", ""))[:60])
+        rst = client.post(f"/videos/{v1}/script/reset", follow_redirects=False)
+        check(rst.status_code == 303 and "已撤销" in unquote(rst.headers["location"])
+              and (db.get_video(v1)["script_text"] or "") == "",
+              "撤销改稿幂等且原稿从未被覆盖")
+        ttsr = client.post(f"/videos/{v1}/tts/synthesize", data={"scene": "class"},
+                           follow_redirects=False)
+        check(ttsr.status_code == 303 and "在线模式" in unquote(ttsr.headers["location"])
+              and db.get_video(v1)["tts_status"] == "",
+              "mock 下朗读合成被拒且不碰 tts_status",
+              unquote(ttsr.headers.get("location", ""))[:60])
+        check(client.get(f"/videos/{v1}/asset/tts/speech.mp3").status_code == 404,
+              "未合成的朗读资源返回 404")
+
+        # -------------------------------------- 7b. 声音复刻：授权留痕、建音色、删除与越权
+        # 只桩住 _post_vc 这一个网络叶子；样本落盘、授权闸门、行级抢锁、模板渲染全走真代码。
+        from app.qwen import QwenError  # noqa: PLC0415 - 仅本节用到
+
+        uid17 = int(alice["id"])
+        vdir17 = pipeline._voice_dir(uid17)
+        keep17 = (settings.llm_mode, settings.api_key, settings.voice_clone_enabled)
+        orig17 = pipeline.QwenClient
+
+        class _VcResp17:
+            def __init__(self, data: dict):
+                self._data = data
+
+            def json(self) -> dict:
+                return self._data
+
+        class _VcStub17(QwenClient):
+            """建音色与删音色都出自 _post_vc，桩在这里就不会真的出门。"""
+
+            def __init__(self, *a, **k):
+                super().__init__(api_key="sk-probe")
+                self.sent: list[dict] = []
+
+            def _post_vc(self, payload, timeout=None):
+                self.sent.append(payload)
+                action = payload["input"]["action"]
+                out = {"voice": "probe-webvoice",
+                       "target_model": payload["input"]["target_model"]} if action == "create" else {}
+                return _VcResp17({"output": out, "usage": {"count": 1}})
+
+        class _VcRefused17(_VcStub17):
+            def _post_vc(self, payload, timeout=None):
+                self.sent.append(payload)
+                raise QwenError("远端拒绝删除", status=500, body="")
+
+        class _VcGone17(_VcStub17):
+            def _post_vc(self, payload, timeout=None):
+                self.sent.append(payload)
+                raise QwenError("音色不存在", status=404, body="")
+
+        vc17 = _VcStub17()
+        try:
+            page(client, f"/videos/{v1}", "我的音色 · 声音复刻", "声音复刻需要在线模式",
+                 label="mock 下复刻节只说明需在线模式，不放操作按钮")
+            settings.voice_clone_enabled = False
+            off = client.post(f"/videos/{v1}/voice/consent", data={"agree": "1"},
+                              follow_redirects=False)
+            check("已由管理员关闭" in unquote(off.headers.get("location", "")),
+                  "站点总开关关闭时连授权入口一起锁死", unquote(off.headers.get("location", ""))[:60])
+            page(client, f"/videos/{v1}", "", absent=("我的音色 · 声音复刻",),
+                 label="总开关关闭后报告页不再出现复刻节")
+
+            settings.voice_clone_enabled = True
+            settings.llm_mode = "real"
+            settings.api_key = "sk-probe"
+            pipeline.QwenClient = lambda *a, **k: vc17
+
+            nogate = client.post(f"/videos/{v1}/voice/create", follow_redirects=False)
+            check("请先勾选录音处理授权" in unquote(nogate.headers.get("location", ""))
+                  and not db.voice_status(uid17)["consented"]
+                  and not db.voice_status(uid17)["has_voice"],
+                  "合并入口未授权又没勾同意时被拦下，授权位与任务位都不被占用",
+                  unquote(nogate.headers.get("location", ""))[:60])
+
+            gateless = page(client, f"/videos/{v1}", "同意授权并创建我的音色", "朗读声音",
+                            absent=("保存授权",), label="未授权时只有一个合并按钮，授权与复刻一步做完")
+            flat0 = " ".join(gateless.split())
+            check('value="clone" disabled' in flat0 and "创建后即可选" in flat0,
+                  "还没建音色时「我的音色」也在单选组里，只是置灰并说明去哪建",
+                  flat0[flat0.find('value="clone"'):][:52] if 'value="clone"' in flat0 else "-")
+
+            cons = client.post(f"/videos/{v1}/voice/consent", data={"agree": "1"},
+                               follow_redirects=False)
+            loc17 = unquote(cons.headers.get("location", ""))
+            check(cons.status_code == 303 and "授权已登记" in loc17 and loc17.endswith("#voice"),
+                  "登记授权后带回执跳回复刻节锚点", loc17[:60])
+            st17 = db.voice_status(uid17)
+            check(st17["consented"] and st17["consent_at"], "授权与确认时间一并留痕", st17["consent_at"])
+            page(client, f"/videos/{v1}", "已授权", "创建我的音色", absent=("保存授权",),
+                 label="授权后授权表单换成创建入口")
+
+            pre = client.post(f"/videos/{v1}/tts/synthesize",
+                              data={"scene": "class", "voice": "clone"}, follow_redirects=False)
+            check("还没有可用的复刻音色" in unquote(pre.headers.get("location", ""))
+                  and db.get_video(v1)["tts_status"] == "",
+                  "有授权但没音色时用本人音色合成被拦下，且不占用任务位",
+                  unquote(pre.headers.get("location", ""))[:60])
+
+            mk = client.post(f"/videos/{v1}/voice/create", follow_redirects=False)
+            check(mk.status_code == 303 and "已提交音色复刻" in unquote(mk.headers.get("location", "")),
+                  "创建音色走后台任务并给出人话回执", unquote(mk.headers.get("location", ""))[:60])
+            # 复刻跑在真后台线程里：voice_status 的 running 是线程内 begin_voice_job 才写的，
+            # 拿它当完成门会读早。submit 在请求线程里同步登记 _active，任务结束才摘掉，
+            # 而 save_user_voice / mark_voice_error 都在摘掉之前写完，所以 is_running 落下即终态。
+            deadline17 = time.time() + 180
+            while pipeline.is_running(v1) and time.time() < deadline17:
+                time.sleep(0.2)
+            st17 = db.voice_status(uid17)
+            check(st17["status"] == "done" and st17["voice_id"] == "probe-webvoice",
+                  "复刻任务完成后音色写回账号", f"{st17['status']}/{st17['error'][:60]}")
+            check(st17["usable"] and st17["voice_model"] == settings.tts_vc_model
+                  and not st17["stale"], "音色与模型同源绑定，立即可用于朗读", st17["voice_model"])
+            check(f"取自视频 #{v1}" in st17["source"], "来源记清了样本出自哪段视频", st17["source"][:44])
+            sent17 = vc17.sent[-1] if vc17.sent else {}
+            in17 = sent17.get("input", {})
+            b64_17 = str(in17.get("audio", {}).get("data", ""))
+            check(sent17.get("model") == "qwen-voice-enrollment" and in17.get("action") == "create"
+                  and in17.get("target_model") == settings.tts_vc_model
+                  and b64_17.startswith("data:audio/wav;base64,"),
+                  "送出的是官方登记模型与 Base64 直传的 wav 样本",
+                  f"{sent17.get('model', '-')}/{in17.get('action', '-')}/{len(b64_17) // 1024}KB")
+            check(not vdir17.exists() or not list(vdir17.glob("*.wav")),
+                  "样本用完即删，人声不留在磁盘上")
+            check(client.get(f"/videos/{v1}/status").json()["voice"] == "done",
+                  "轮询通道带出复刻状态")
+            check(db.video_usage(db.get_video(v1))["creations"] >= 1,
+                  "复刻次数计入本条视频的用量")
+            withv = page(client, f"/videos/{v1}", "删除音色", 'value="clone"', "我的音色",
+                         label="有音色后给出删除入口与「我的音色」单选项")
+            check(f"音色 probe-webvoice · 绑定 {settings.tts_vc_model}" in withv,
+                  "音色标识与绑定模型如实展示")
+            flat1 = " ".join(withv.split())
+            check('value="clone" disabled' not in flat1 and "is-off" not in flat1,
+                  "建好音色后单选项不再置灰，直接可选本人音色")
+
+            adm = TestClient(app)
+            adm.post("/login", data={"username": settings.admin_username,
+                                     "password": settings.admin_password, "next": "/admin"},
+                     follow_redirects=False)
+            ac = adm.post(f"/videos/{v1}/voice/create", follow_redirects=False)
+            check("管理员不能代为" in unquote(ac.headers.get("location", "")),
+                  "管理员不能替学生重做音色", unquote(ac.headers.get("location", ""))[:60])
+            ad = adm.post(f"/videos/{v1}/voice/delete", follow_redirects=False)
+            check("管理员不能代为" in unquote(ad.headers.get("location", "")),
+                  "管理员也不能替学生删除音色", unquote(ad.headers.get("location", ""))[:60])
+            check("我的音色 · 声音复刻" not in adm.get(f"/videos/{v1}").text,
+                  "管理员看学生报告时复刻节整段隐藏")
+
+            refused = _VcRefused17()
+            pipeline.QwenClient = lambda *a, **k: refused
+            bad = client.post(f"/videos/{v1}/voice/delete", follow_redirects=False)
+            check("音色删除失败" in unquote(bad.headers.get("location", ""))
+                  and db.voice_status(uid17)["has_voice"],
+                  "远端删除失败时不假装已删除，本地记录原样留着",
+                  unquote(bad.headers.get("location", ""))[:60])
+            check(db.voice_status(uid17)["consent_at"] == st17["consent_at"],
+                  "删除失败也不动授权留痕")
+
+            gone = _VcGone17()
+            pipeline.QwenClient = lambda *a, **k: gone
+            dg = client.post(f"/videos/{v1}/voice/delete", follow_redirects=False)
+            check("已删除本人音色" in unquote(dg.headers.get("location", ""))
+                  and not db.voice_status(uid17)["has_voice"]
+                  and db.voice_status(uid17)["consented"],
+                  "远端 404 按删除成功处理，且删音色保留授权",
+                  unquote(dg.headers.get("location", ""))[:70])
+            check(gone.sent[-1]["input"]["action"] == "delete"
+                  and gone.sent[-1]["input"]["voice"] == "probe-webvoice",
+                  "删除请求带上了正确的音色标识")
+
+            wk = client.post(f"/videos/{v1}/voice/consent", data={}, follow_redirects=False)
+            st17 = db.voice_status(uid17)
+            check("已撤回授权" in unquote(wk.headers.get("location", ""))
+                  and not st17["consented"] and not st17["consent_at"],
+                  "撤回授权后授权留痕一并清空", str(st17["consent_at"]))
+        finally:
+            # 万一中途崩在断言上，也要撑到后台任务收工再还原：迟到的线程一旦拿着已还原的
+            # 演示模式去建客户端，只会抛出一句与本节意图无关的「真实评审模式未启用」。
+            grace17 = time.time() + 30
+            while pipeline.is_running(v1) and time.time() < grace17:
+                time.sleep(0.2)
+            pipeline.QwenClient = orig17
+            settings.llm_mode, settings.api_key, settings.voice_clone_enabled = keep17
+            page(client, f"/videos/{v1}", "声音复刻需要在线模式",
+                 label="还原演示模式后复刻节退回在线模式提示")
 
         # ------------------------------------------------------------ 对比页
         page(client, "/compare", "历次对比", "维度轮廓", "逐项分值对照", "变化量", "总分趋势",
@@ -416,6 +615,25 @@ def main() -> int:
         site = db.token_usage(per_video=8)
         check(site["by_user"] and site["by_user"][0]["name"].endswith("（alice）"),
               "全站按用户分组带昵称与账号名", str(site["by_user"][:1]))
+
+        # 修订（token）与合成（字符）合到同一次按需调用，验证两条轴都能到报告页上。
+        extra = QwenClient()
+        extra.mark("文字稿修订")._track(
+            {"messages": [{"role": "user", "content": "请找出稿中错字"}]},
+            Completion(text='{"items": []}', model="mock",
+                       usage={"prompt_tokens": 300, "completion_tokens": 100, "total_tokens": 400}))
+        extra.mark("朗读合成").track_characters("qwen3-tts-flash", 860, estimated=True)
+        merged = db.add_usage(v1, extra.usage_summary())
+        check(merged["characters"] == 860 and merged["total"] == usage["total"] + 400,
+              "按需累加同时保住 token 与字符", f"{merged['total']} token / {merged['characters']} 字符")
+        by_stage = {s["name"]: s for s in db.video_usage(db.get_video(v1))["by_stage"]}
+        check(by_stage["朗读合成"]["characters"] == 860 and by_stage["朗读合成"]["total"] == 0
+              and by_stage["文字稿修订"]["characters"] == 0,
+              "单视频用量把合成行只算字符", str(by_stage.get("朗读合成")))
+        page(client, f"/videos/{v1}", "用量统计", "朗读合成", "字符", "860",
+             label="报告页渲染用量小节且带字符轴")
+        check(client.get(f"/videos/{v2}").text.find("用量统计") == -1,
+              "无明细的报告不误显示用量小节")
         check(client.get(f"/videos/{v2}").status_code == 200, "用量写入不影响他人报告读取")
 
         # ------------------------------------------------------------ 复发问题清理
@@ -728,10 +946,11 @@ def main() -> int:
         adm.post("/login", data={"username": settings.admin_username, "password": settings.admin_password,
                                  "next": "/settings"}, follow_redirects=False)
         secret = settings.api_key
-        body = page(adm, "/settings", "系统设置", "环境配置", "30 项", "DASHSCOPE_API_KEY",
+        body = page(adm, "/settings", "系统设置", "环境配置", f"{len(cfg.ENV_FIELDS)} 项",
+                    "DASHSCOPE_API_KEY",
                     "保存并生效", "api_key.txt", "来自",
                     "并发分析数", "在线请求并发数", "网页工作线程数",
-                    "自动压缩目标", "压缩超时",
+                    "自动压缩目标", "压缩超时", "可行性闸门",
                     absent=((secret,) if len(secret) > 8 else ()),
                     label="设置页渲染全部配置项")
         check('type="password"' in body and "留空表示不修改" in body, "密钥框不明文回显")
@@ -768,7 +987,7 @@ def main() -> int:
         # ------------------------------------------------ 大模型提示词（与 .env 分开的第二条链路）
         check(not prm.PROMPTS_FILE.exists(), "保存 .env 表单不会写提示词文件")
         env_snapshot = cfg.read_env_file()
-        body = page(adm, "/settings", "提示词配置", "19 块 · 0 块已自定义", "保存提示词",
+        body = page(adm, "/settings", "提示词配置", f"{len(prm.PROMPT_FIELDS)} 块 · 0 块已自定义", "保存提示词",
                     "全部恢复内置默认", 'name="common_rules"', 'name="narrative_schema"',
                     'name="qa_context"', 'name="qa_review_schema"',
                     "<textarea", "内置默认", label="设置页渲染提示词分区")
@@ -793,7 +1012,7 @@ def main() -> int:
         check(list(disk["prompts"]) == ["common_rules"], "提示词文件只落差异块", str(list(disk["prompts"])))
         check(prm.get("common_rules").startswith("自定义硬性规则") and prm.get("system") == prm.DEFAULTS["system"],
               "保存后分析链路立即读到新提示词")
-        page(adm, "/settings", "19 块 · 1 块已自定义", "管理员自定义", "_websmoke.prompts.json",
+        page(adm, "/settings", f"{len(prm.PROMPT_FIELDS)} 块 · 1 块已自定义", "管理员自定义", "_websmoke.prompts.json",
              label="重开页面显示自定义状态")
         check(cfg.read_env_file() == env_snapshot, "保存提示词不会动 .env 文件")
 
@@ -802,7 +1021,7 @@ def main() -> int:
               "一键恢复内置默认", f"{rs.status_code} {unquote(rs.headers.get('location', ''))}")
         check(prm.get("common_rules") == prm.DEFAULTS["common_rules"] and prm.custom_count() == 0,
               "恢复后回到内置默认且计数归零")
-        page(adm, rs.headers["location"], "已恢复", "19 块 · 0 块已自定义", label="恢复结果提示可见")
+        page(adm, rs.headers["location"], "已恢复", f"{len(prm.PROMPT_FIELDS)} 块 · 0 块已自定义", label="恢复结果提示可见")
 
         check(client.post("/settings/prompts", data=prompt_form(), follow_redirects=False).status_code == 403,
               "普通用户不能保存提示词")
