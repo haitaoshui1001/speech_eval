@@ -22,10 +22,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import (accounts, config, db, face as face_mod, pipeline,
-               prompts, qwen)
-from .analyze import (QA_ANSWER_FALLBACK, build_questions, channel_weights,
-                      fallback_questions, review_answers)
+from . import (accounts, buildinfo, config, db, face as face_mod, pipeline,
+               prompts, qwen, revise, tts, voice as voice_mod)
+from .analyze import (QA_ANSWER_FALLBACK, QA_QUESTION_COUNT, build_questions,
+                      channel_weights, fallback_questions, review_answers)
 from .config import settings
 from .rubric import rubric as DEFAULT_RUBRIC
 from .security import (make_session_token, password_ok, read_session_token,
@@ -34,7 +34,7 @@ from .security import (make_session_token, password_ok, read_session_token,
 BASE = Path(__file__).resolve().parent
 COOKIE = "sid"
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mpg", ".mpeg", ".wmv", ".3gp"}
-ASSET_RE = re.compile(r"^(?:cover\.jpg|audio\.wav|frames/frame_\d{1,3}\.jpg)$")
+ASSET_RE = re.compile(r"^(?:cover\.jpg|audio\.wav|frames/frame_\d{1,3}\.jpg|tts/speech\.mp3)$")
 PAGE_SIZE = 200
 
 
@@ -337,7 +337,9 @@ def video_status(video_id: int, request: Request):
     _, video = owned_video(request, video_id)
     return JSONResponse({"id": video_id, "status": video["status"], "stage": video["stage"],
                          "progress": video["progress"], "error": video["error"],
-                         "running": pipeline.is_running(video_id)})
+                         "running": pipeline.is_running(video_id),
+                         "tts": video["tts_status"], "script": video["script_status"],
+                         "voice": db.voice_status(int(video["user_id"]))["status"]})
 
 
 def _qa_redirect(video_id: int, msg: str = "") -> RedirectResponse:
@@ -352,6 +354,7 @@ def qa_generate(video_id: int, request: Request):
         return _qa_redirect(video_id, "评价完成后才能生成导师提问")
     if db.get_questions(video_id):
         return _qa_redirect(video_id, "导师提问已存在")
+    notes: list[str] = []
     try:
         ev = db.get_evaluation(video_id)
         report = json.loads(ev["payload"] or "{}") if ev else {}
@@ -360,7 +363,7 @@ def qa_generate(video_id: int, request: Request):
             try:
                 questions = build_questions(client, DEFAULT_RUBRIC, report,
                                             video["transcript"], video["topic"],
-                                            video["requirements"])
+                                            video["requirements"], note=notes)
             finally:
                 db.add_usage(video_id, client.usage_summary())
         else:
@@ -368,7 +371,8 @@ def qa_generate(video_id: int, request: Request):
         db.save_questions(video_id, video["user_id"], questions)
     except Exception:  # noqa: BLE001 - 出题失败只回执，不抛错页
         return _qa_redirect(video_id, "生成导师提问失败，请稍后重试")
-    return _qa_redirect(video_id)
+    # 换过模型就要让学生看见：题目看着一样，口径未必一样，不能只留一条成功回执。
+    return _qa_redirect(video_id, "；".join(notes))
 
 
 @app.post("/videos/{video_id}/qa/answer")
@@ -380,25 +384,306 @@ async def qa_answer(video_id: int, request: Request):
         return _qa_redirect(video_id, "还没有导师提问")
     answers = {q["idx"]: str(form.get(f"answer_{q['idx']}") or "").strip() for q in questions}
     if any(not answers[q["idx"]] for q in questions):
-        return _qa_redirect(video_id, "请把 3 个问题都回答后再提交")
+        return _qa_redirect(video_id, f"请把 {QA_QUESTION_COUNT} 个问题都回答后再提交")
     pairs = [(q["question"], answers[q["idx"]]) for q in questions]
+    notes: list[str] = []
     if settings.real_mode:
         ev = db.get_evaluation(video_id)
         report = json.loads(ev["payload"] or "{}") if ev else {}
         client = qwen.QwenClient().mark("导师点评")
         try:
-            comments = review_answers(client, report, pairs, note=[])
+            comments = review_answers(client, report, pairs, note=notes)
         finally:
             db.add_usage(video_id, client.usage_summary())
     else:
         comments = [QA_ANSWER_FALLBACK] * len(pairs)
     for q, comment in zip(questions, comments):
         db.save_qa_answer(video_id, q["idx"], answers[q["idx"]], comment)
-    return _qa_redirect(video_id, "已收到你的作答，导师点评已生成")
+    msg = "已收到你的作答，导师点评已生成"
+    if notes:
+        msg += "（" + "；".join(notes) + "）"
+    return _qa_redirect(video_id, msg)
+
+
+def _script_redirect(video_id: int, msg: str = "") -> RedirectResponse:
+    # 回执走 smsg 而非 msg：qa 节与 script 节同页，各显示各自的回执，互不串台。
+    tail = "?smsg=" + quote(msg) if msg else ""
+    return RedirectResponse(f"/videos/{video_id}{tail}#script", status_code=303)
+
+
+def _script_meta(video: sqlite3.Row) -> dict:
+    """script_meta 容错解析：坏 JSON 按「无指纹信息」处理，不让报告页 500。"""
+    try:
+        meta = json.loads(video["script_meta"] or "{}")
+    except ValueError:
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+@app.post("/videos/{video_id}/script/propose")
+def script_propose(video_id: int, request: Request, glossary: str = Form("")):
+    """生成修订建议：提交后台任务，页面轮询 /status 显示进度（方案 §5.3）。
+
+    早期版本是同步等待，云端网关在模型返回前就断连返回 504，但后端仍跑完并落库，
+    表现为「报错但刷新有结果」。改成与朗读合成同范式的后台任务后彻底消除。
+    """
+    _, video = owned_video(request, video_id)
+    if not settings.revise_enabled:
+        return _script_redirect(video_id, "文字修订已关闭，请联系管理员在设置页开启")
+    if not settings.real_mode:
+        return _script_redirect(video_id, "文字修订需要在线模式（配置 API key 后使用）")
+    if video["status"] != "done":
+        return _script_redirect(video_id, "评价完成后才能生成修订建议")
+    if not (video["transcript"] or "").strip():
+        return _script_redirect(video_id, "没有可用的转写文字稿")
+    if video["script_status"] == "running" or pipeline.is_running(video_id):
+        return _script_redirect(video_id, "该视频已有任务在跑，请等它完成后再提交")
+    g = (glossary or "").strip()[:400]
+    if not pipeline.submit(lambda vid, gl=g: pipeline.run_propose(vid, gl),
+                           video_id, pipeline.run_propose_error):
+        return _script_redirect(video_id, "生成任务已在队列中，请稍候")
+    return _script_redirect(video_id,
+                            "已提交生成，进度显示在下方，完成后本页自动刷新；稿子越长等待越久")
+
+
+@app.post("/videos/{video_id}/script/decide")
+async def script_decide(video_id: int, request: Request):
+    """应用学生勾选的决定：纯本地替换、不调模型，pending 等同不采纳（§5.2）。"""
+    _, video = owned_video(request, video_id)
+    items = revise.items_from_json(video["script_items"])
+    if not items:
+        return _script_redirect(video_id, "当前没有待确认的建议，请先点击「生成修订建议」")
+    meta = _script_meta(video)
+    if revise.is_stale(video["transcript"] or "", meta):
+        return _script_redirect(video_id, "文字稿已更新（重新分析过），旧建议已失效，请重新生成")
+    form = await request.form()
+    chosen = {k: v for k, v in form.items() if str(k).startswith("accept_")}
+    decided = revise.decisions_from_form(chosen, items)
+    accepted = sum(1 for x in decided if x.decision == "accepted")
+    transcript = video["transcript"] or ""
+    final = revise.apply_revisions(transcript, decided) if accepted else ""
+    if final == transcript:
+        final = ""  # 空串 = 成稿完全等同原稿，下游（字幕/朗读/导出）一律读 transcript
+    meta.update({"applied_count": accepted, "decided_at": db.now()})
+    db.update_video(video_id, script_status="decided",
+                    script_items=revise.items_to_json(decided),
+                    script_text=final, script_meta=meta)
+    msg = f"已采纳 {accepted} 处修订并生成定稿" if accepted else "未勾选任何条目，保持原稿"
+    return _script_redirect(video_id, msg)
+
+
+@app.post("/videos/{video_id}/script/reset")
+def script_reset(video_id: int, request: Request):
+    """撤销全部修订：成稿清空、建议全置 rejected，原稿从未被覆盖（§5.2 保证三）。"""
+    _, video = owned_video(request, video_id)
+    items = revise.items_from_json(video["script_items"])
+    for it in items:
+        it.decision = "rejected"
+    meta = _script_meta(video)
+    meta.update({"applied_count": 0, "decided_at": db.now()})
+    db.update_video(video_id, script_status="decided" if items else "",
+                    script_items=revise.items_to_json(items),
+                    script_text="", script_meta=meta)
+    return _script_redirect(video_id, "已撤销全部修订，恢复原稿")
+
+
+def _tts_redirect(video_id: int, msg: str = "") -> RedirectResponse:
+    tail = "?tmsg=" + quote(msg) if msg else ""
+    return RedirectResponse(f"/videos/{video_id}{tail}#tts", status_code=303)
+
+
+def _tts_ctx(video: sqlite3.Row) -> dict:
+    """朗读节上下文：状态、指纹失配、可合成判据都在这一个字典里给模板。"""
+    try:
+        meta = json.loads(video["tts_meta"] or "{}")
+    except ValueError:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    final = (video["script_text"] or "").strip()
+    effective = final or (video["transcript"] or "").strip()
+    can = settings.tts_enabled and settings.real_mode and video["status"] == "done"
+    ok, why = tts.tts_feasibility(effective) if can else (False, "")
+    stale = bool(meta.get("text_hash")) and meta["text_hash"] != revise.source_hash(effective)
+    clone = db.user_voice_for_tts(int(video["user_id"]))[0]
+    return {"enabled": settings.tts_enabled, "real": settings.real_mode,
+            "status": video["tts_status"], "path": video["tts_path"],
+            "error": video["tts_error"], "meta": meta, "stale": stale,
+            "can": ok, "why": why, "scenes": tts.SCENES,
+            "scene": meta.get("scene") or "class",
+            "clone": clone, "used_clone": bool(meta.get("clone")),
+            "basis": "修订成稿" if final else "原始转写",
+            "adopted": _script_meta(video).get("applied_count") or 0,
+            "chars": len(effective)}
+
+
+@app.post("/videos/{video_id}/tts/synthesize")
+def tts_synthesize(video_id: int, request: Request, scene: str = Form("class"),
+                   voice: str = Form("")):
+    """提交朗读示范合成：后台任务，页面轮询 /status 直到出片（方案 §6.4）。
+
+    voice="clone" 时按本人复刻音色朗读（方案 §9）。这里只粗筛「这个账号到底有没有
+    可用音色」，音色与模型的成对校验留在 run_tts——远端要求两者同源才肯读。
+    """
+    _, video = owned_video(request, video_id)
+    if not settings.tts_enabled:
+        return _tts_redirect(video_id, "朗读合成已关闭，请联系管理员在设置页开启")
+    if not settings.real_mode:
+        return _tts_redirect(video_id, "朗读合成需要在线模式（配置 API key 后使用）")
+    if video["status"] != "done":
+        return _tts_redirect(video_id, "评价完成后才能合成朗读示范")
+    if video["tts_status"] == "running" or pipeline.is_running(video_id):
+        return _tts_redirect(video_id, "该视频已有任务在跑，请等它完成后再提交")
+    text = (video["script_text"] or "").strip() or (video["transcript"] or "").strip()
+    ok, why = tts.tts_feasibility(text)
+    if not ok:
+        return _tts_redirect(video_id, why)
+    use_clone = voice == "clone"
+    if use_clone:
+        if not settings.voice_clone_enabled:
+            return _tts_redirect(video_id, "声音复刻已关闭，请用系统音色合成")
+        if not db.user_voice_for_tts(int(video["user_id"]))[0]:
+            return _tts_redirect(video_id, "还没有可用的复刻音色，请先在「我的音色」里授权并创建")
+    sc = scene if scene in tts.SCENES else "class"
+    if not pipeline.submit(lambda vid, sc=sc, cl=use_clone: pipeline.run_tts(vid, sc, cl), video_id):
+        return _tts_redirect(video_id, "合成任务已在队列中，请稍候")
+    return _tts_redirect(video_id, "已提交合成，朗读越长耗时越久，完成后本页自动刷新")
+
+
+def _voice_redirect(video_id: int, msg: str = "") -> RedirectResponse:
+    tail = "?vmsg=" + quote(msg) if msg else ""
+    return RedirectResponse(f"/videos/{video_id}{tail}#voice", status_code=303)
+
+
+def _voice_gate(user: sqlite3.Row, video: sqlite3.Row) -> str:
+    """复刻入口的硬闸门，返回人话原因（空串代表放行）。
+
+    管理员能看学生的报告，但不能替学生授权或重做音色：授权必须是本人点的，
+    否则「已同意处理录音」这条留痕就成了伪造证据。
+    """
+    if not settings.voice_clone_enabled:
+        return "声音复刻已由管理员关闭，只能使用系统音色"
+    if not settings.real_mode:
+        return "声音复刻需要在线模式（配置 API key 后使用）"
+    if user["id"] != video["user_id"]:
+        return "音色属于账号本人，管理员不能代为授权或重做"
+    if video["status"] != "done":
+        return "评价完成后才能在原视频里挑一段连续朗读做复刻"
+    return ""
+
+
+def _voice_ctx(user: sqlite3.Row, video: sqlite3.Row) -> dict:
+    """「我的音色」节上下文：状态、授权留痕、两个按钮各自能不能点，一次算清交给模板。
+
+    can_consent 与 can_create 必须分开：没授权正是该勾授权的时候，若只看「能不能建音色」，
+    授权复选框会被自己的前置条件锁死，用户永远迈不出第一步。
+    """
+    uid = int(video["user_id"])
+    st = db.voice_status(uid)
+    running = st["status"] == "running"
+    busy = bool(running or pipeline.is_running(int(video["id"])) or video["tts_status"] == "running")
+    st["running"] = running
+    st["busy"] = busy
+    st["owner"] = user["id"] == video["user_id"]
+    st["enabled"] = settings.voice_clone_enabled
+    st["real"] = settings.real_mode
+    st["spec"] = f"{voice_mod.VC_SAMPLE_MIN:.0f}~{voice_mod.VC_SAMPLE_MAX:.0f} 秒"
+    why = _voice_gate(user, video)
+    if not why and busy:
+        why = "该视频已有任务在跑，请等它完成后再操作"
+    st["why"] = why
+    st["can_consent"] = not why
+    st["can_create"] = not why and st["consented"]
+    return st
+
+
+@app.post("/videos/{video_id}/voice/consent")
+async def voice_consent(video_id: int, request: Request):
+    """登记或撤回「处理本人录音」的授权：这是挑样本、建音色前后唯一合法的准入凭证。
+
+    撤回时先删远端音色再撤授权：反过来做会丢掉 voice 标识，人声就永远挂在服务方那边。
+    远端没删掉就保持已授权状态并回执原因，让用户重试，而不是留下「已撤回但嗓子还在」的假合规。
+    """
+    user, video = owned_video(request, video_id)
+    uid = int(video["user_id"])
+    why = _voice_gate(user, video)
+    if why:
+        return _voice_redirect(video_id, why)
+    form = await request.form()
+    agreed = str(form.get("agree") or "").strip().lower() in {"1", "on", "true", "yes"}
+    if agreed:
+        db.set_voice_consent(uid, True)
+        return _voice_redirect(video_id, "授权已登记：样本只从本段视频里挑，用完即删，可随时撤回")
+    st = db.voice_status(uid)
+    if st["status"] == "running":
+        return _voice_redirect(video_id, "复刻任务进行中，请等它结束再撤回授权")
+    if st["has_voice"]:
+        try:
+            pipeline.drop_voice(uid)
+        except Exception as exc:  # noqa: BLE001 - 删除失败不能假装授权已撤回
+            return _voice_redirect(video_id, f"音色删除失败，授权暂未撤回（{exc}），请稍后重试")
+    db.set_voice_consent(uid, False)
+    return _voice_redirect(video_id, "已撤回授权，本人音色与相关记录一并删除")
+
+
+@app.post("/videos/{video_id}/voice/create")
+async def voice_create(video_id: int, request: Request):
+    """提交账号级复刻任务：借「本次提交所在的视频」挑样本，进度写在该视频的 stage 上。
+
+    任务是账号级的（一个账号长期只留一副嗓子），但轮询通道是视频级的，
+    所以提交必须挂在某个视频上；真正防重复建音色靠 db.begin_voice_job 的行级抢锁。
+
+    表单里带 agree 时把「登记授权」并进来一次做完：授权动作本来就发生在此人
+    明确勾选并提交的那一刻，留痕与单独点「保存授权」完全等价，少一次点击少一分误解。
+    """
+    user, video = owned_video(request, video_id)
+    uid = int(video["user_id"])
+    why = _voice_gate(user, video)
+    if why:
+        return _voice_redirect(video_id, why)
+    form = await request.form()
+    agreed = str(form.get("agree") or "").strip().lower() in {"1", "on", "true", "yes"}
+    st = db.voice_status(uid)
+    if st["status"] == "running" or pipeline.is_running(video_id):
+        return _voice_redirect(video_id, "已有任务在跑，请等它完成后再提交")
+    just_consent = False
+    if not st["consented"]:
+        if not agreed:
+            return _voice_redirect(video_id, "请先勾选录音处理授权，我们才会读取你原视频里的声音")
+        db.set_voice_consent(uid, True)
+        just_consent = True
+    if not pipeline.submit(pipeline.run_voice, video_id, pipeline.run_voice_error):
+        return _voice_redirect(video_id, "复刻任务已在队列中，请稍候")
+    return _voice_redirect(
+        video_id,
+        ("授权已登记并同步提交音色复刻" if just_consent else "已提交音色复刻") +
+        "，一般十几秒到一分钟，完成后本页自动刷新")
+
+
+@app.post("/videos/{video_id}/voice/delete")
+def voice_delete(video_id: int, request: Request):
+    """删除音色但保留授权：想换个片段重做的人不该被要求重新勾一遍同意。
+
+    这个入口不受站点开关限制——管理员关掉复刻，不能顺便让学生删不掉自己的嗓子。
+    """
+    user, video = owned_video(request, video_id)
+    if user["id"] != video["user_id"]:
+        return _voice_redirect(video_id, "音色属于账号本人，管理员不能代为删除")
+    uid = int(video["user_id"])
+    if db.voice_status(uid)["status"] == "running":
+        return _voice_redirect(video_id, "复刻任务进行中，请等它结束再删除音色")
+    try:
+        voice = pipeline.drop_voice(uid)
+    except Exception as exc:  # noqa: BLE001 - 删除失败要留在页面上，不能静默
+        return _voice_redirect(video_id, f"音色删除失败：{exc}")
+    return _voice_redirect(video_id,
+                           "已删除本人音色" + (f"（{voice}）" if voice else "") +
+                           "，授权仍然保留，可随时用别的片段重做")
 
 
 @app.get("/videos/{video_id}", response_class=HTMLResponse)
-def video_page(request: Request, video_id: int, msg: str = ""):
+def video_page(request: Request, video_id: int, msg: str = "", smsg: str = "", tmsg: str = "",
+               vmsg: str = ""):
     user, video = owned_video(request, video_id)
     if video["status"] != "done":
         return render(request, "progress.html", nav="dashboard", video=video,
@@ -421,11 +706,25 @@ def video_page(request: Request, video_id: int, msg: str = ""):
         prev = {"video": history[rank - 2], "dims": prev_dims}
     segments = json.loads(video["segments"] or "[]")
     qa = db.get_questions(video_id)
+    script_items = revise.items_from_json(video["script_items"])
+    script_meta = _script_meta(video)
+    script = {"enabled": settings.revise_enabled, "status": video["script_status"],
+              "items": revise.stamp_items(script_items, segments), "meta": script_meta,
+              "final": video["script_text"] or "",
+              "error": video["script_error"], "stage": video["stage"],
+              "progress": video["progress"],
+              "stale": revise.is_stale(video["transcript"] or "", script_meta),
+              "labels": revise.KIND_LABELS,
+              "notes": [str(x) for x in (script_meta.get("notes") or []) if str(x).strip()],
+              "recommended": {k: rec for k, _, _, rec in revise.KINDS}}
     return render(request, "report.html", nav="dashboard", video=video, report=report, dims=dims,
                   frames=frames, film=film, face=face, ev=ev, prev=prev, rank=rank,
                   total_runs=len(history),
                   segments=segments, is_owner=user["id"] == video["user_id"],
                   qa=qa, qa_answered=any(q["status"] == "answered" for q in qa), msg=msg,
+                  smsg=smsg, script=script, tmsg=tmsg, tts=_tts_ctx(video),
+                  vmsg=vmsg, voice=_voice_ctx(user, video),
+                  usage=db.video_usage(video),
                   user_rows=db.list_user_videos(video["user_id"], limit=PAGE_SIZE))
 
 
@@ -447,7 +746,13 @@ def asset(video_id: int, name: str, request: Request):
     path = settings.artifact_dir / str(video_id) / name
     if not path.exists():
         raise HTTPException(status_code=404, detail="资源不存在")
-    return _stream(path, request, "audio/wav" if name.endswith(".wav") else "image/jpeg")
+    if name.endswith(".wav"):
+        mime = "audio/wav"
+    elif name.endswith(".mp3"):
+        mime = "audio/mpeg"
+    else:
+        mime = "image/jpeg"
+    return _stream(path, request, mime)
 
 
 def _stream(path: Path, request: Request, media_type: str) -> StreamingResponse:
@@ -994,6 +1299,9 @@ async def health():
 
 def _health_payload(web_threads: int) -> dict:
     return {"ok": True, "mode": "real" if settings.real_mode else "mock",
+            # 代码指纹（BUILD_INFO.json）：升级验收时确认「跑的就是刚传的那一版」。
+            # 旧包/开发目录取不到时是 unknown，只说明来源，不影响本接口成功。
+            "version": buildinfo.version(),
             "key_source": settings.api_key_source, "rubric": DEFAULT_RUBRIC.version,
             "models": {"chat": settings.chat_model, "vision": settings.vlm_model,
                        "audio": settings.omni_model, "asr": settings.asr_model},

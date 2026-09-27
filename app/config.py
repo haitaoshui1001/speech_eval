@@ -45,6 +45,8 @@ def _read_key_file(p: Path) -> dict[str, str]:
         "image_model": "vision_model",
         "audio_model": "audio_model", "omni_model": "audio_model",
         "asr_model": "asr_model", "transcribe_model": "asr_model",
+        "tts_model": "tts_model", "synthesis_model": "tts_model", "synth_model": "tts_model",
+        "revise_model": "revise_model", "revision_model": "revise_model",
     }
     found: dict[str, str] = {}
     for line in raw_lines:
@@ -54,7 +56,9 @@ def _read_key_file(p: Path) -> dict[str, str]:
         for sep in (":", "="):
             if sep in ln:
                 label, value = ln.split(sep, 1)
-                label = label.strip().lower().replace("-", "_").replace(" ", "")
+                # 标签归一：连字符与任意空白段统一成单下划线，`vision model` / `vision-model` /
+                # `vision_model` 三种写法都能命中同一个槽位（apikey、baseurl 这类无空格写法仍保留）。
+                label = "_".join(label.strip().lower().replace("-", " ").split())
                 value = value.strip().strip('"').strip("'")
                 slot = labels.get(label)
                 if slot and value:
@@ -113,20 +117,30 @@ def resolve_base_url() -> str:
     return (FILE_VALUES.get("base_url") or DEFAULT_BASE_URL).strip().rstrip("/")
 
 
+def normalize_model(value: str) -> str:
+    """模型标识归一化：千问侧模型名区分大小写且官方写法全小写。
+
+    `Qwen3-TTS-Flash` 这种手写大小写会先吃一个 400 才降级，既慢又多算一次失败请求；
+    在解析入口统一转小写（顺带去掉了会出现在粘贴值里的空白），运行期就不必靠试错纠正大小写。
+    """
+    return "".join((value or "").split()).lower()
+
+
 def resolve_model(env_name: str, file_slots: tuple[str, ...], default: str) -> str:
     """模型优先级：.env / 环境变量填写 > api_key.txt 的 model / vision model / … > 内置默认。
 
     只要 .env 里填了非空值就视为显式指定（网页设置页正是这样写回的）；
     留空则沿用 api_key.txt，那是用户指定的“唯一配置入口”。
+    三条通道取到的值一律过 normalize_model，保证六路模型名口径一致。
     """
     from_env = os.getenv(env_name, "").strip()
     if from_env:
-        return from_env
+        return normalize_model(from_env)
     for slot in file_slots:
         val = (FILE_VALUES.get(slot) or "").strip()
         if val:
-            return val
-    return default.strip()
+            return normalize_model(val)
+    return normalize_model(default)
 
 
 def _flag(name: str, default: str = "1") -> bool:
@@ -182,7 +196,8 @@ ENV_GROUPS: tuple[tuple[str, str, tuple[EnvField, ...]], ...] = (
                           ("real", "real · 强制真实调用"),
                           ("mock", "mock · 演示模式，不联网")), default="auto"),
     )),
-    ("评审通道", "三通道评审（文本 / 画面 / 语音）所使用的服务与参数，留空即沿用 api_key.txt。", (
+    ("评审通道", "三通道评审（文本 / 画面 / 语音）所使用的服务与参数，留空即沿用 api_key.txt；"
+     "模型名不区分大小写，保存时统一转成官方小写写法。", (
         EnvField("CHAT_MODEL", "文本评审通道", "text", "chat_model",
                  "按评分标准逐维度打分的主通道。", "影响新任务",
                  default="qwen-plus", file_slot=("model",)),
@@ -244,6 +259,10 @@ ENV_GROUPS: tuple[tuple[str, str, tuple[EnvField, ...]], ...] = (
         EnvField("COMPRESS_TIMEOUT", "压缩超时（秒）", "int", "compress_timeout",
                  "每一遍编码的上限时间，超时保留原文件并报错。", "影响新任务",
                  default="1800", low=60, high=21600),
+        EnvField("COMPRESS_FEASIBILITY", "压缩可行性闸门", "bool", "compress_feasibility",
+                 "编码前先算「这个时长装不装得进目标、跑不跑得过超时」：装不下直接报错并给出所需最小体积，"
+                 "画质会破线则留告警放行。关闭后退回旧行为（闷头跑完再失败）。",
+                 "影响新任务", default="1"),
         EnvField("USER_UPLOAD_LIMIT", "每人上传次数", "int", "user_upload_limit",
                  "新账号默认可上传的视频个数，用完即止；管理员可在后台单独重置或放行。",
                  "影响新账号与未单独设置的账号", default="5", low=1, high=10000),
@@ -261,10 +280,70 @@ ENV_GROUPS: tuple[tuple[str, str, tuple[EnvField, ...]], ...] = (
         EnvField("REQUEST_TIMEOUT", "请求超时（秒）", "int", "request_timeout",
                  "单次在线评审请求超时。", "影响新任务", default="180", low=10, high=1800),
     )),
+    ("文字稿与朗读", "修订建议与朗读合成的开关和上限；都是新增能力，开关默认开，填 0 即退回旧行为。", (
+        EnvField("REVISE_ENABLED", "文字稿修订", "bool", "revise_enabled",
+                 "报告页「文字稿与朗读」节的总开关：关闭后不生成修订建议，页面隐藏该节。",
+                 "影响下一次生成建议", default="1"),
+        EnvField("REVISE_MODEL", "修订模型", "text", "revise_model",
+                 "生成修订建议用的文本模型，留空跟随「文本评审通道」。模型名不分大小写（自动转小写）。",
+                 "影响下一次生成建议", default="", file_slot=("revise_model",)),
+        EnvField("REVISE_TIMEOUT", "修订请求超时（秒）", "int", "revise_timeout",
+                 "生成修订建议是整条链路里最慢的一次调用——比对全稿要输出整篇建议，"
+                 "实测 1600 字稿子要 350 秒。所以它不跟随「请求超时」，单独给一条更宽的预算；"
+                 "填得过小会让生成稳定失败在 35%，填得过大只是白等。超时后只再试一次。",
+                 "影响下一次生成建议", default="600", low=60, high=1800),
+        EnvField("REVISE_MAX_CHANGE_RATIO", "全篇改幅上限（%）", "int", "revise_max_change_ratio",
+                 "红线 R2：全部建议条目累计净增删的字符数不超过原文的这个比例，超线后停止采纳。",
+                 "影响下一次生成建议", default="8", low=1, high=50),
+        EnvField("REVISE_MAX_STYLE_ITEMS", "润色条目上限", "int", "revise_max_style_items",
+                 "红线 R5：结合主题的风格类（style）润色最多采纳几条，防止整篇被改口。",
+                 "影响下一次生成建议", default="5", low=0, high=50),
+        EnvField("TTS_ENABLED", "朗读合成", "bool", "tts_enabled",
+                 "在线 TTS 朗读合成的总开关：关闭后页面只留文字稿，不显示合成入口。",
+                 "影响下一次合成", default="1"),
+        EnvField("TTS_MODEL", "合成模型", "text", "tts_model",
+                 "朗读合成模型，默认 qwen3-tts-instruct-flash（自然语言指令通道）；"
+                 "换 cosyvoice-* 即切数值参数通道，此时一般还要填合成端点。模型名不分大小写（自动转小写），"
+                 "但换的是通道不是音色——非 instruct 模型会丢掉表现力指令。",
+                 "影响下一次合成", default="qwen3-tts-instruct-flash", file_slot=("tts_model",)),
+        EnvField("TTS_VOICE", "音色", "text", "tts_voice",
+                 "朗读音色。Neil 为男声、字正腔圆新闻腔；需女声可改 Cherry。",
+                 "影响下一次合成", default="Neil"),
+        EnvField("VOICE_CLONE_ENABLED", "声音复刻", "bool", "voice_clone_enabled",
+                 "站点级复刻总开关：关闭后报告页不显示「我的音色」，学生既不能授权也不能建音色。"
+                 "开启只是放出入口，处理本人录音仍要每个学生单独勾选授权，随时可撤回并删除音色。",
+                 "影响下一次合成", default="1"),
+        EnvField("TTS_VC_MODEL", "复刻合成模型", "text", "tts_vc_model",
+                 "声音复刻建好的音色绑定的合成模型，官方要求音色与模型死绑、不可跨模型使用。"
+                 "默认 qwen3-tts-vc-2026-01-22（非实时合成）；除非官方发布新的 vc 模型，不要改这里，"
+                 "改了要用新的音色重新复刻。",
+                 "影响下一次合成", default="qwen3-tts-vc-2026-01-22"),
+        EnvField("TTS_ENDPOINT", "合成端点", "text", "tts_endpoint",
+                 "留空=从接口地址推导 host，走默认 multimodal-generation 端点；"
+                 "仅 CosyVoice 北京 workspace 需要填完整 URL。",
+                 "影响下一次合成", default="", clearable=True),
+        EnvField("TTS_CHUNK_CHARS", "分块字数", "int", "tts_chunk_chars",
+                 "单次合成请求的最大字符数。必须明显低于模型 512 Token 的物理上限，"
+                 "分块只在句边界切开，绝不切到句子中间。",
+                 "影响下一次合成", default="1600", low=200, high=2000),
+        EnvField("TTS_MAX_CHUNKS", "分块数上限", "int", "tts_max_chunks",
+                 "一次朗读最多切几块。定稿超长会先由闸门拒绝并提示，不会偷偷放宽。",
+                 "影响下一次合成", default="8", low=1, high=32),
+        EnvField("TTS_INSTRUCTIONS", "表现力指令增强", "bool", "tts_instructions",
+                 "映射 optimize_instructions：让模型把粗线条演绎指令细化执行。填 0 关闭。",
+                 "影响下一次合成", default="1"),
+        EnvField("TTS_TIMEOUT", "合成超时（秒）", "int", "tts_timeout",
+                 "单个分块的 HTTP 超时。闸门用「块数 × 单块预算」预估整次耗时是否跑得完。",
+                 "影响下一次合成", default="300", low=30, high=1800),
+    )),
 )
 
 ENV_FIELDS: tuple[EnvField, ...] = tuple(f for _, _, fs in ENV_GROUPS for f in fs)
 ENV_BY_KEY: dict[str, EnvField] = {f.key: f for f in ENV_FIELDS}
+
+# 模型名类字段：值统一按 normalize_model 小写化，保存时也按此校验（空格、大小写都不是有效模型标识）。
+MODEL_KEYS = frozenset({"CHAT_MODEL", "VLM_MODEL", "OMNI_MODEL", "ASR_MODEL",
+                        "REVISE_MODEL", "TTS_MODEL", "TTS_VC_MODEL"})
 
 
 @dataclass
@@ -296,6 +375,8 @@ class Settings:
     # 只留上限的话，50MB 这种严格阈值会把大文件直接拒之门外，永远轮不到压缩。
     compress_target_bytes: int = field(default_factory=lambda: _int("COMPRESS_TARGET_MB", 50) * 1024 * 1024)
     compress_timeout: int = field(default_factory=lambda: _int("COMPRESS_TIMEOUT", 1800))
+    # 闸门只拦"注定失败"的单：物理装不下或必超时的素材提前报错，省一遍编码的 CPU 与等待。
+    compress_feasibility: bool = field(default_factory=lambda: _flag("COMPRESS_FEASIBILITY"))
     user_upload_limit: int = field(default_factory=lambda: _int("USER_UPLOAD_LIMIT", 5))
     session_days: int = field(default_factory=lambda: _int("SESSION_DAYS", 7))
 
@@ -310,6 +391,25 @@ class Settings:
     max_llm_requests: int = field(default_factory=lambda: _int("MAX_LLM_REQUESTS", 20))
     web_threads: int = field(default_factory=lambda: _int("WEB_THREADS", 64))
     request_timeout: int = field(default_factory=lambda: _int("REQUEST_TIMEOUT", 180))
+
+    revise_enabled: bool = field(default_factory=lambda: _flag("REVISE_ENABLED"))
+    revise_model: str = field(default_factory=lambda: resolve_model("REVISE_MODEL", ("revise_model",), ""))
+    revise_timeout: int = field(default_factory=lambda: _int("REVISE_TIMEOUT", 600))
+    revise_max_change_ratio: int = field(default_factory=lambda: _int("REVISE_MAX_CHANGE_RATIO", 8))
+    revise_max_style_items: int = field(default_factory=lambda: _int("REVISE_MAX_STYLE_ITEMS", 5))
+
+    tts_enabled: bool = field(default_factory=lambda: _flag("TTS_ENABLED"))
+    tts_model: str = field(default_factory=lambda: resolve_model(
+        "TTS_MODEL", ("tts_model",), "qwen3-tts-instruct-flash"))
+    tts_voice: str = field(default_factory=lambda: os.getenv("TTS_VOICE", "Neil").strip() or "Neil")
+    voice_clone_enabled: bool = field(default_factory=lambda: _flag("VOICE_CLONE_ENABLED"))
+    tts_vc_model: str = field(default_factory=lambda: resolve_model(
+        "TTS_VC_MODEL", (), "qwen3-tts-vc-2026-01-22"))
+    tts_endpoint: str = field(default_factory=lambda: os.getenv("TTS_ENDPOINT", "").strip())
+    tts_chunk_chars: int = field(default_factory=lambda: _int("TTS_CHUNK_CHARS", 1600))
+    tts_max_chunks: int = field(default_factory=lambda: _int("TTS_MAX_CHUNKS", 8))
+    tts_instructions: bool = field(default_factory=lambda: _flag("TTS_INSTRUCTIONS"))
+    tts_timeout: int = field(default_factory=lambda: _int("TTS_TIMEOUT", 300))
 
     @property
     def db_path(self) -> Path:
@@ -545,6 +645,13 @@ def validate_env_updates(raw: Mapping[str, str],
                 errors.append(f"{f.label}：不得大于 {_num(f.high)}")
                 continue
             updates[f.key] = str(int(num)) if f.kind == "int" else _num(num)
+            continue
+        if f.key in MODEL_KEYS:
+            # 模型标识既没有大写写法也没有空格：大小写保存时归一，含空格直接报错（那是填错了）。
+            if any(c.isspace() for c in value):
+                errors.append(f"{f.label}：模型名不能含空格，请填写形如 qwen-plus 的标识")
+                continue
+            updates[f.key] = normalize_model(value)
             continue
         updates[f.key] = value
     if updates.get("ASR_ENGINE") == "whisper" and not (updates.get("WHISPER_MODEL_SIZE") or "").strip():

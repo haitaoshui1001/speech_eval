@@ -3,7 +3,7 @@
 {% block body %}
 {% set pct = report['pct'] or 0 %}
 {% set conf = report['confidence'] or 0 %}
-{% set usage = report['usage'] %}
+{% set usage = usage if usage and usage['calls'] else report['usage'] %}
 
 <div class="mono no-print" style="font-size:11.5px;letter-spacing:.1em;color:var(--ink-3);margin-bottom:14px">
   <a href="{{ '/admin' if me['role'] == 'admin' else '/dashboard' }}">{{ '管理后台' if me['role'] == 'admin' else '我的演讲' }}</a> / 报告 #{{ video['id'] }}
@@ -56,6 +56,8 @@
         <div>用量<b>{{ usage['total'] | n }} token</b>
           <div class="hint mono" style="font-size:11px;color:var(--ink-3)">{{ usage['calls'] }} 次调用 ·
             入 {{ usage['prompt'] | n }} / 出 {{ usage['completion'] | n }}
+            {%- if usage.get('characters') %} · 合成 {{ usage['characters'] | n }} 字符{% endif %}
+            {%- if usage.get('creations') %} · 定制 {{ usage['creations'] }} 次音色{% endif %}
             {%- if usage['estimated_calls'] %} · 含 {{ usage['estimated_calls'] }} 次估算{% endif %}</div>
         </div>
         {% endif %}
@@ -228,21 +230,25 @@
 </section>
 
 {% if usage and usage['calls'] %}
+{% set chars_total = usage.get('characters') or 0 %}
+{% set crea_total = usage.get('creations') or 0 %}
 <section class="sheet" data-reveal="6">
   <div class="section-title" style="margin-top:0"><h2>用量统计</h2>
-    <span>{{ usage['calls'] }} 次调用 · {{ usage['total'] | n }} token</span></div>
+    <span>{{ usage['calls'] }} 次调用 · {{ usage['total'] | n }} token{% if chars_total %} · {{ chars_total | n }} 字符{% endif %}{% if crea_total %} · 定制 {{ crea_total }} 次音色{% endif %}</span></div>
   <div class="rows">
     <div>
       <div class="table-wrap narrow">
       <table class="sheet-table">
-        <thead><tr><th>阶段</th><th class="num">次数</th><th class="num">输入</th><th class="num">输出</th><th class="num">小计</th></tr></thead>
+        <thead><tr><th>阶段</th><th class="num">次数</th><th class="num">输入</th><th class="num">输出</th><th class="num">小计</th>{% if chars_total %}<th class="num">字符</th>{% endif %}{% if crea_total %}<th class="num">音色</th>{% endif %}</tr></thead>
         <tbody>
           {% for s in usage['by_stage'] %}
           <tr><td>{{ s['name'] }}{% if s['estimated'] %} <span class="tag tag-amber" style="font-size:10px;padding:1px 6px">估算</span>{% endif %}</td>
             <td class="num">{{ s['calls'] }}</td>
             <td class="num">{{ s['prompt'] | n }}</td>
             <td class="num">{{ s['completion'] | n }}</td>
-            <td class="num"><b>{{ s['total'] | n }}</b></td></tr>
+            <td class="num"><b>{{ s['total'] | n }}</b></td>
+            {%- if chars_total %}<td class="num">{{ (s['characters'] or 0) | n }}</td>{% endif %}
+            {%- if crea_total %}<td class="num">{{ (s['creations'] or 0) or '—' }}</td>{% endif %}</tr>
           {% endfor %}
         </tbody>
       </table>
@@ -251,6 +257,7 @@
     <div class="panel">
       <h3>说明</h3>
       <ul>
+        <li>评判、修订建议与导师问答按 token 记账；朗读合成按<b>字符</b>记账，两轴分列显示。</li>
         <li>「估算」表示该次响应未返回用量字段，按字符数折算，仅用于观察量级。</li>
         <li>计费以服务方控制台账单为准。</li>
       </ul>
@@ -323,7 +330,7 @@
   </div>
   {% if msg %}<div class="alert info no-print">{{ msg }}</div>{% endif %}
   {% if not qa %}
-    <p class="dim-text">还没有思考题。生成后导师会针对这份演讲提 3 个问题，你逐条作答，AI 会给出每题两三句话的简评。</p>
+    <p class="dim-text">还没有提问。生成后导师会就读这份演讲提 2 个英文问题，针对稿子里的论点、案例或引用当场追问你——考察临场反应、语言组织和思辨，不评分。你用英文逐条作答，AI 给出每题两三句话的中文简评。</p>
     <form class="inline-form no-print" method="post" action="/videos/{{ video['id'] }}/qa/generate">
       <button class="btn small" type="submit">生成导师提问</button>
     </form>
@@ -334,11 +341,11 @@
         <li class="qa-item">
           <div class="qa-no mono">{{ q['idx'] }}</div>
           <div class="qa-body">
-            <p class="qa-question">{{ q['question'] }}</p>
+            <p class="qa-question" lang="en">{{ q['question'] }}</p>
             <label class="field">
-              <span class="dim-text">你的作答</span>
-              <textarea name="answer_{{ q['idx'] }}" rows="3"
-                        placeholder="写下你的思考，提交后逐题点评">{{ q['answer'] }}</textarea>
+              <span class="dim-text">你的作答（建议用英文，像被当场追问那样直接回答）</span>
+              <textarea name="answer_{{ q['idx'] }}" rows="3" lang="en"
+                        placeholder="Answer in English, as you would on the spot. Your answer is commented on, not scored.">{{ q['answer'] }}</textarea>
             </label>
             {% if q['ai_comment'] %}<p class="qa-comment">{{ q['ai_comment'] }}</p>{% endif %}
           </div>
@@ -350,6 +357,302 @@
                 onclick="return confirm('提交会覆盖此前的作答与点评，继续？')">提交作答</button>
       </div>
     </form>
+  {% endif %}
+</section>
+
+{% set sitems = script['items'] %}
+{% set smeta = script['meta'] %}
+<section class="sheet" id="script" data-reveal="7">
+  <div class="section-title" style="margin-top:0"><h2>文字稿与朗读</h2>
+    <span>
+    {%- if not script['enabled'] %}文字修订已关闭
+    {%- elif script['status'] == 'running' %}正在生成修订建议…
+    {%- elif script['stale'] %}旧建议已失效 · 请重新生成
+    {%- elif script['status'] == 'proposed' and sitems %}{{ sitems | length }} 条修订建议 · 不认可的请取消勾选
+    {%- elif script['status'] == 'proposed' %}本轮没有过红线的建议 · 原稿未动
+    {%- elif script['status'] == 'decided' and sitems %}已采纳 {{ smeta.get('applied_count') or 0 }} 处 / 共 {{ sitems | length }} 条建议
+    {%- elif sitems %}{{ sitems | length }} 条修订建议
+    {%- else %}文字稿修订 · 确认后才改稿{% endif %}
+    </span>
+  </div>
+  {% if smsg %}<div class="alert info no-print">{{ smsg }}</div>{% endif %}
+
+  {% if not script['enabled'] %}
+    <p class="dim-text">文字修订功能当前已关闭（REVISE_ENABLED=0），如需开启请联系管理员在系统设置页启用。</p>
+
+  {% elif not real_mode %}
+    <div class="alert info">演示模式（未配置 API key）：修订建议与朗读示范需要在线模式，当前整节不可用，文字稿原样保留。</div>
+
+  {% else %}
+    {% if script['status'] == 'running' %}
+      <div class="task-progress" id="script-running" data-vid="{{ video['id'] }}">
+        <div class="task-progress-head">
+          <span class="spinner"></span><b>正在生成修订建议</b>
+          <span class="dim-text mono" id="script-pct">{{ video['progress'] or 5 }}%</span>
+        </div>
+        <div class="progress-rail"><i id="script-bar" style="width:{{ video['progress'] or 5 }}%"></i></div>
+        <div class="mono dim-text" id="script-stage" style="font-size:12px;margin-top:7px">
+          {{ video['stage'] or '排队等待修订' }}</div>
+        <div class="mono dim-text" id="script-elapsed" style="font-size:11.5px;margin-top:3px"></div>
+        <div class="dim-text" style="font-size:12px;margin-top:4px">
+          这一步要把全稿送给大模型比对，是整条链路里最慢的一步：实测一千六百字左右要六分钟，
+          稿子越长越久。进度停在 35% 属正常（那一次调用没有中间进度可报）。可以放心切到别的标签页，
+          生成完成后本页会自动刷新；万一超时失败，原稿与建议都不会被动过，重新点一次即可。</div>
+      </div>
+    {% elif script['status'] == 'failed' %}
+      <div class="alert">上次生成失败：{{ (script['error'] or '')[:180] or '原因未记录' }}——原稿与已有建议都没被动过，可以重新点一次。</div>
+    {% endif %}
+
+    {% if script['final'] %}
+      <div class="no-print" style="margin:0 0 10px">
+        <button type="button" class="btn small" id="view-src">显示原文</button>
+        <button type="button" class="btn small ghost" id="view-final">显示成稿</button>
+        <span class="dim-text" style="font-size:12px;margin-left:8px">原文是你说的原话，成稿是采纳修订后的定稿</span>
+      </div>
+      <div id="script-src" class="transcript">{{ video['transcript'] }}</div>
+      <div id="script-final" class="transcript" hidden>{{ script['final'] }}</div>
+    {% endif %}
+
+    {% if script['stale'] %}
+      <div class="alert">文字稿已重新分析，旧修订建议自动失效——修订是针对某一版原稿的，稿子换了建议就得重出。</div>
+    {% elif sitems %}
+      <form id="script-decide" class="no-print" method="post" action="/videos/{{ video['id'] }}/script/decide">
+        <div class="table-wrap">
+          <table class="sheet-table">
+            <thead><tr><th>类型</th><th>原文 → 建议</th><th>理由</th><th style="width:64px">采纳</th><th style="width:76px">时间点</th></tr></thead>
+            <tbody>
+              {% for it in sitems %}
+              <tr>
+                <td><span class="tag {{ 'tag-olive' if script['recommended'].get(it['kind']) else 'tag-amber' }}">{{ script['labels'].get(it['kind'], it['kind']) }}</span></td>
+                <td><span class="dim-text">{{ it['before'] }}</span><br><b>{{ it['after'] }}</b></td>
+                <td style="font-size:13px">{{ it['reason'] }}</td>
+                <td style="text-align:center">
+                  <input type="checkbox" name="accept_{{ it['idx'] }}" value="1"
+                         {{ 'checked' if it['decision'] == 'accepted'
+                              or (it['decision'] == 'pending' and script['recommended'].get(it['kind'])) }}>
+                </td>
+                <td>{% if it['ts'] %}<span class="time-chip mono" data-seek="{{ it['ts'] }}">{{ it['ts'] }}</span>
+                    {% else %}<span class="dim-text">—</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="mono dim-text" style="font-size:11px;margin:8px 0 0">
+          建议出自 {{ smeta.get('model') or '模型' }}{% if smeta.get('proposed_at') %} · {{ smeta['proposed_at'] }}{% endif %}{% if smeta.get('dropped') %} · {{ smeta['dropped'] | length }} 条越出红线被自动丢弃{% endif %}
+        </p>
+      </form>
+      <p class="dim-text no-print" style="font-size:12.5px;margin:10px 0 0">
+        「建议采纳」类已预先勾选，但<b>点按钮的人才说了算</b>：不认可的取消勾选，什么都不点则一字不改。时间点可跳回视频原位，听一下自己当时怎么说的。
+      </p>
+    {% else %}
+      {% if script['status'] == 'proposed' and smeta.get('dropped') %}
+        <div class="alert">
+          AI 这轮给出的 {{ smeta['dropped'] | length }} 条建议全部越出红线被自动丢弃，所以原稿一字未改。
+          最常见的原因是模型改写后没能在原稿里逐字定位到那句话，或单条改动幅度过大。
+          可在下方「术语提示」里把易听错的人名、术语列出来（逗号分隔）再生成一次，命中率会高很多。
+        </div>
+        <details class="no-print" style="margin:6px 0 0">
+          <summary class="dim-text mono" style="font-size:11.5px;cursor:pointer">查看丢弃明细（只用于排查，不需要你看懂）</summary>
+          <ul class="dim-text mono" style="font-size:11.5px;margin:6px 0 0;padding-left:18px">
+            {% for d in (smeta['dropped'] or [])[:6] %}<li>{{ d }}</li>{% endfor %}
+            {% if (smeta['dropped'] | length) > 6 %}<li>……仅列前 6 条</li>{% endif %}
+          </ul>
+        </details>
+      {% elif script['status'] == 'proposed' %}
+        <div class="alert info">AI 通读了全稿，认为没有需要修订的地方——这是常见结果，说明稿子本身干净。
+          若你明知有同音字听错，可在下方「术语提示」里列出术语后再生成一次。</div>
+      {% else %}
+        <p class="dim-text">还没有修订建议。生成后 AI 会对照主题找出同音字、术语听错的地方，并给出少量结合主题的小润色——全部以建议呈现，你逐条确认才会改稿。</p>
+      {% endif %}
+      {% for w in (smeta.get('warnings') or []) %}
+        <div class="alert info">修订范围提示：{{ w }}</div>
+      {% endfor %}
+    {% endif %}
+
+    <form id="script-propose" class="no-print script-cta" method="post" action="/videos/{{ video['id'] }}/script/propose" style="margin-top:16px">
+      <div class="script-cta-box">
+        <button class="btn cta" type="submit"
+                {% if script['status'] == 'running' %}disabled{% endif %}
+                {% if sitems %}onclick="return confirm('重新生成会清空当前建议与成稿（原稿不受影响），继续？')"{% endif %}>
+          {{ '重新生成修订建议' if sitems else '生成修订建议' }}</button>
+        <div class="script-cta-note">
+          <b>点这里让 AI 通读全稿出修订建议</b>
+          <span class="dim-text">提交后不用守着：进度显示在本页顶部，生成完成自动刷新。原稿不会被改，每条建议都要你勾一次才算。</span>
+        </div>
+      </div>
+      <label class="field" style="max-width:620px;margin-top:10px">
+        <span class="dim-text">术语提示（可选）：把可能被听错的人名、术语用逗号列出，如「新质生产力,数字化转型」</span>
+        <input type="text" name="glossary" value="{{ smeta.get('glossary') or '' }}" placeholder="没有可留空">
+      </label>
+      {% if script['notes'] %}
+        {% for n in script['notes'] %}
+          <div class="alert info" style="margin-top:8px">修订模型提示：{{ n }}</div>
+        {% endfor %}
+      {% endif %}
+    </form>
+
+    {% if sitems %}
+    <div class="no-print" style="margin-top:14px">
+      <form class="inline-form" method="post" action="/videos/{{ video['id'] }}/script/reset">
+        <button class="btn small" type="submit"
+                onclick="return confirm('{{ '将撤销全部已采纳的修订、恢复原稿，继续？' if script['final'] else '将丢弃全部建议并保持原稿一字不改，继续？' }}')">
+          {{ '撤销全部修订' if script['final'] else '保持原稿' }}</button>
+      </form>
+      <button class="btn small ghost" type="submit" form="script-decide">采纳勾选项</button>
+    </div>
+    {% endif %}
+  {% endif %}
+
+  {% if voice['enabled'] and voice['owner'] %}
+  <div id="voice" style="margin-top:20px">
+    <h3 class="block-title">我的音色 · 声音复刻</h3>
+    {% if vmsg %}<div class="alert info no-print">{{ vmsg }}</div>{% endif %}
+    {% if not voice['real'] %}
+      <p class="dim-text">声音复刻需要在线模式：配置 API key 后，你可以用本人的声音听朗读示范，而不是系统播音员。</p>
+    {% else %}
+      {% if voice['running'] %}
+        <div class="task-progress" id="voice-running" data-vid="{{ video['id'] }}">
+          <div class="task-progress-head">
+            <span class="spinner"></span><b>音色复刻进行中</b>
+            <span class="dim-text mono" id="voice-pct">{{ video['progress'] or 5 }}%</span>
+          </div>
+          <div class="progress-rail"><i id="voice-bar" style="width:{{ video['progress'] or 5 }}%"></i></div>
+          <div class="mono dim-text" id="voice-stage" style="font-size:12px;margin-top:7px">
+            {{ video['stage'] or '排队等待复刻' }}</div>
+          <div class="dim-text" style="font-size:12px;margin-top:4px">
+            系统只从你这段视频里挑一段连续朗读做样本，样本用完即删。一般十几秒到一分钟，完成后本页自动刷新。</div>
+        </div>
+      {% endif %}
+      {% if voice['stale'] %}
+        <div class="alert">复刻模型已改为 {{ voice['target_model'] }}，音色与模型是绑死的，旧音色不能再用，请按下方按钮重做一次。</div>
+      {% endif %}
+      {% if voice['status'] == 'failed' and voice['error'] %}
+        <div class="alert">上次复刻失败：{{ (voice['error'] or '')[:180] }}</div>
+      {% elif voice['error'] %}
+        <div class="alert info">{{ voice['error'] }}</div>
+      {% endif %}
+      {% if voice['has_voice'] and not voice['stale'] %}
+        <p class="mono dim-text" style="font-size:11.5px;margin:2px 0 10px">
+          音色 {{ voice['voice_id'] }} · 绑定 {{ voice['voice_model'] }}
+          {%- if voice['source'] %} · 样本{{ voice['source'] }}{% endif %}
+          {%- if voice['created_at'] %} · {{ voice['created_at'] }}{% endif %}</p>
+      {% endif %}
+
+      {% if not voice['consented'] %}
+        <form class="no-print" method="post" action="/videos/{{ video['id'] }}/voice/create">
+          <label style="display:flex;gap:9px;align-items:flex-start;font-size:13px;line-height:1.6">
+            <input type="checkbox" name="agree" value="1" required style="margin-top:4px;flex:none">
+            <span>我同意系统处理我上传视频中的<b>本人声音</b>：从这段讲话里挑一段约 {{ voice['spec'] }} 的连续朗读，
+            上传到云端模型复刻我的专属音色。样本只用于这一次复刻、用完立即删除；我随时可以撤回本授权，
+            撤回会同时删除云端音色和本地记录。</span>
+          </label>
+          <div style="margin-top:12px">
+            <button class="btn cta" type="submit" {% if not voice['can_consent'] %}disabled{% endif %}>同意授权并创建我的音色</button>
+            <span class="dim-text" style="font-size:12px;margin-left:8px">
+              {{ voice['why'] if voice['why'] else '勾选后点一下即完成授权与复刻，不用再点第二次' }}</span>
+          </div>
+        </form>
+      {% else %}
+        <div class="no-print" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <form method="post" action="/videos/{{ video['id'] }}/voice/create">
+            <button class="btn cta" type="submit" {% if not voice['can_create'] %}disabled{% endif %}
+                    {% if voice['has_voice'] %}onclick="return confirm('重做会用新的样本覆盖当前音色，原音色将从云端删除，继续？')"{% endif %}>
+              {{ '重做我的音色' if voice['has_voice'] and not voice['stale'] else '创建我的音色' }}</button>
+          </form>
+          {% if voice['has_voice'] %}
+          <form method="post" action="/videos/{{ video['id'] }}/voice/delete">
+            <button class="btn small ghost" type="submit"
+                    onclick="return confirm('将删除云端音色，朗读示范退回系统音色，继续？')">删除音色</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/videos/{{ video['id'] }}/voice/consent">
+            <button class="btn small ghost" type="submit"
+                    {% if voice['running'] %}disabled{% endif %}
+                    onclick="return confirm('撤回后本人音色与相关记录将一并删除，继续？')">撤回授权</button>
+          </form>
+          <span class="dim-text" style="font-size:12px">
+            已授权（{{ voice['consent_at'] }}）· 样本从本段视频自动挑选，长约 {{ voice['spec'] }}
+            {{ '· ' + voice['why'] if voice['why'] else '' }}</span>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if tts['enabled'] %}
+  <div id="tts" style="margin-top:20px">
+    <h3 class="block-title">朗读示范 · {{ tts['basis'] }}（{{ tts['chars'] }} 字）</h3>
+    {% if tmsg %}<div class="alert info no-print">{{ tmsg }}</div>{% endif %}
+    {% if not tts['real'] %}
+      <p class="dim-text">朗读示范需要在线模式：配置 API key 后即可按主题情感与演讲现场合成一段示范朗读。</p>
+    {% else %}
+      {% if tts['status'] == 'done' and tts['path'] %}
+        <audio controls preload="none" style="width:100%;max-width:640px"
+               src="/videos/{{ video['id'] }}/asset/{{ tts['path'] }}?v={{ tts['meta'].get('synthesized_at') or '' }}"></audio>
+        <p class="dim-text" style="font-size:12.5px;margin:6px 0 0">
+          本段朗读依据：{{ tts['basis'] }}{% if tts['adopted'] %}（已采纳 {{ tts['adopted'] }} 处修订）{% endif %}
+          · 合成 {{ tts['meta'].get('model') or '—' }} · 音色 {{ tts['meta'].get('voice') or '—' }}
+          · {% if tts['used_clone'] %}复刻音色按原声朗读，未附加表现力指令{% elif tts['meta'].get('style_source') == 'model' %}情感由主题推断{% else %}情感按现场默认{% endif %}
+          {%- if tts['meta'].get('chunks') %} · {{ tts['meta']['chunks'] }} 块拼接{% endif %}
+          {%- if tts['meta'].get('characters') %} · 计费 {{ tts['meta']['characters'] }} 字符{% endif %}
+          {%- if tts['meta'].get('synthesized_at') %} · {{ tts['meta']['synthesized_at'] }}{% endif %}
+        </p>
+        {% for w in tts['meta'].get('warnings') or [] %}
+          <div class="alert info">{{ w }}</div>
+        {% endfor %}
+        {% if tts['stale'] %}
+          <div class="alert">稿子已改（采纳了新修订或重新分析过），当前音频与稿不一致，建议重新合成。</div>
+        {% endif %}
+      {% elif tts['status'] == 'running' %}
+        <div class="task-progress" id="tts-running" data-vid="{{ video['id'] }}">
+          <div class="task-progress-head">
+            <span class="spinner"></span><b>朗读合成进行中</b>
+            <span class="dim-text mono" id="tts-pct">{{ video['progress'] or 5 }}%</span>
+          </div>
+          <div class="progress-rail"><i id="tts-bar" style="width:{{ video['progress'] or 5 }}%"></i></div>
+          <div class="mono dim-text stage" id="tts-stage" style="font-size:11.5px">{{ video['stage'] or '排队等待合成' }}</div>
+          <div class="dim-text" style="font-size:12.5px">按字符计费、逐块合成，稿子越长耗时越久。这一步可以切走干别的，完成后本页会自动刷新。</div>
+        </div>
+      {% elif tts['status'] == 'failed' %}
+        <div class="alert">上次合成失败：{{ (tts['error'] or '')[:160] }}</div>
+      {% endif %}
+      <form class="no-print" method="post" action="/videos/{{ video['id'] }}/tts/synthesize" style="margin-top:12px">
+        <div class="synth-controls">
+          <label class="field" style="max-width:220px"><span class="dim-text">朗读现场</span>
+            <select name="scene">
+              {% for k, label in tts['scenes'].items() %}
+              <option value="{{ k }}" {{ 'selected' if tts['scene'] == k }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <span class="voice-opts">
+            <span class="dim-text" style="font-size:12px">朗读声音</span>
+            <label class="voice-opt">
+              <input type="radio" name="voice" value="system"
+                     {{ 'checked' if not (tts['clone'] and tts['used_clone']) }}> 系统音色</label>
+            <label class="voice-opt {{ 'is-off' if not tts['clone'] }}">
+              <input type="radio" name="voice" value="clone"
+                     {{ 'checked' if tts['clone'] and tts['used_clone'] }}
+                     {%- if not tts['clone'] %} disabled title="还没有创建我的音色，请先在上方「我的音色」里授权并创建"{% endif %}> 我的音色</label>
+            {% if not tts['clone'] %}<span class="dim-text" style="font-size:12px">（在上方「我的音色」创建后即可选）</span>{% endif %}
+          </span>
+        </div>
+        <div class="synth-actions">
+          <button class="btn cta" type="submit"
+                  {% if tts['status'] == 'running' or not tts['can'] %}disabled{% endif %}
+                  {% if tts['status'] == 'done' %}onclick="return confirm('重新合成会覆盖当前朗读示范，继续？')"{% endif %}>
+            {{ '重新合成朗读' if tts['status'] == 'done' else '合成朗读示范' }}</button>
+          <span class="dim-text" style="font-size:12px">
+            按主题情感与现场要求在线合成，按字符计费；稿子越长耗时越久
+            {%- if tts['clone'] %}；选「我的音色」时按你的原声朗读，不附加表现力指令{% endif %}</span>
+        </div>
+      </form>
+      {% if not tts['can'] and tts['status'] != 'running' %}
+        <p class="dim-text" style="font-size:12.5px;margin:8px 0 0">{{ tts['why'] }}</p>
+      {% endif %}
+    {% endif %}
+  </div>
   {% endif %}
 </section>
 {% endblock %}
@@ -369,6 +672,86 @@
       player.play().catch(function () {});
     });
   });
+})();
+(function () {
+  var src = document.getElementById('script-src'), fin = document.getElementById('script-final');
+  if (!src || !fin) return;
+  var b1 = document.getElementById('view-src'), b2 = document.getElementById('view-final');
+  function show(final) {
+    src.hidden = final;
+    fin.hidden = !final;
+    b1.className = 'btn small' + (final ? ' ghost' : '');
+    b2.className = 'btn small' + (final ? '' : ' ghost');
+  }
+  b1.addEventListener('click', function () { show(false); });
+  b2.addEventListener('click', function () { show(true); });
+})();
+(function () {
+  var mark = document.getElementById('tts-running');
+  if (!mark) return;
+  var stage = document.getElementById('tts-stage');
+  var pct = document.getElementById('tts-pct');
+  var bar = document.getElementById('tts-bar');
+  var timer = setInterval(function () {
+    fetch('/videos/' + mark.getAttribute('data-vid') + '/status', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var p = Math.max(5, Math.min(99, j.progress || 0));
+        if (stage && j.stage) stage.textContent = j.stage;
+        if (pct) pct.textContent = p + '%';
+        if (bar) bar.style.width = p + '%';
+        if (j.tts !== 'running') { clearInterval(timer); location.reload(); }
+      })
+      .catch(function () {});
+  }, 3000);
+})();
+(function () {
+  var mark = document.getElementById('voice-running');
+  if (!mark) return;
+  var stage = document.getElementById('voice-stage');
+  var pct = document.getElementById('voice-pct');
+  var bar = document.getElementById('voice-bar');
+  var timer = setInterval(function () {
+    fetch('/videos/' + mark.getAttribute('data-vid') + '/status', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var p = Math.max(5, Math.min(99, j.progress || 0));
+        if (stage && j.stage) stage.textContent = j.stage;
+        if (pct) pct.textContent = p + '%';
+        if (bar) bar.style.width = p + '%';
+        if (j.voice !== 'running') { clearInterval(timer); location.reload(); }
+      })
+      .catch(function () {});
+  }, 3000);
+})();
+(function () {
+  var mark = document.getElementById('script-running');
+  if (!mark) return;
+  var stage = document.getElementById('script-stage');
+  var pct = document.getElementById('script-pct');
+  var bar = document.getElementById('script-bar');
+  var el = document.getElementById('script-elapsed');
+  var t0 = Date.now();
+  if (el) {
+    var tick = function () {
+      var s = Math.max(0, Math.round((Date.now() - t0) / 1000));
+      el.textContent = '已等待 ' + s + ' 秒 · 35%→75% 之间是一次完整的模型调用，进度暂时停住属正常';
+    };
+    tick();
+    setInterval(tick, 1000);
+  }
+  var timer = setInterval(function () {
+    fetch('/videos/' + mark.getAttribute('data-vid') + '/status', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var p = Math.max(5, Math.min(99, j.progress || 0));
+        if (stage && j.stage) stage.textContent = j.stage;
+        if (pct) pct.textContent = p + '%';
+        if (bar) bar.style.width = p + '%';
+        if (j.script !== 'running') { clearInterval(timer); location.reload(); }
+      })
+      .catch(function () {});
+  }, 2500);
 })();
 </script>
 {% endblock %}

@@ -225,68 +225,182 @@ PROMPT_GROUPS: tuple[tuple[str, str, tuple[PromptField, ...]], ...] = (
             "键名改了又没改模板 → 该栏空白",
             must_contain=('"advantages"', '"disadvantages"', '"suggestions"', '"summary"')),
     )),
-    ("导师提问", "评价完成后由导师针对本稿出 3 道思考题，学生作答后再逐题点评。", (
+    ("导师提问", "评价完成后由导师针对本稿出 2 道英文追问，学生临场作答，再逐题给中文点评。", (
         PromptField("qa_system", "导师提问 · 系统提示词",
-            "你是大学英语演讲课的导师，手上有学生的演讲稿和一份已完成的评价报告。你会先后做两件事。"
-            "一是出 3 道思考题：紧扣演讲主题与本稿内容，覆盖其薄弱维度，不得出题与稿件无关的通用题；"
-            "不出记忆性题目，要学生解释自己为什么这样讲、怎么改。"
-            "二是在学生作答之后逐题点评：只针对他写下的答案，两三句话讲清哪里站得住、哪里还欠一层，"
-            "不要复述学生原话。两次回答都只输出 JSON，不要任何解释文字。",
-            "出题与点评两次请求共用的 system 角色：既管「题只出自这篇稿子」，也管「点评只两三句话」。",
+            "You are the questioning tutor at an English public-speaking competition. You have the "
+            "candidate's speech transcript and a finished evaluation report, and you do two things in "
+            "sequence.\n"
+            "1) Ask questions. Produce exactly 2 questions, written in English. Your purpose is to "
+            "challenge this candidate on the spot — to see how fast they can think, how well they can "
+            "organise language under pressure, and whether they can reason and defend a position. "
+            "Anchor every question in something the candidate actually said in this speech: point to the "
+            "specific claim, step of reasoning, example, story, statistic or quoted line you are "
+            "referring to, then ask about it. Go after the most question-worthy material you can find — "
+            "a leap where the evidence does not carry the conclusion; a central theme that gets diluted "
+            "or lost; an example that does not really fit the point it is used for; a strong assertion "
+            "left without support; a famous quote or philosophical line that decorates rather than "
+            "argues; a key term used but never defined; an obvious counter-argument left unhandled. "
+            "Phrase each question as an open, short prompt that can be answered impromptu "
+            "(Why...? How do you know...? What would you say to someone who...? Take that apart for us.). "
+            "Never ask recall, definition or vocabulary questions, never ask generic questions that could "
+            "be put to any speech, and never ask about delivery mechanics or scores.\n"
+            "2) After the candidate answers, comment on each answer in Chinese: two or three sentences "
+            "about what they actually wrote — what holds up and where one more layer is missing. "
+            "Do not repeat their words back.\n"
+            "Never judge. Your questions must carry no evaluation, criticism, scoring or "
+            "praise-then-correct framing: avoid wording such as 'you failed to', 'your speech was weak', "
+            "'the problem with your example'. Ask; do not assess.\n"
+            "Both times, output JSON only, with no other text.",
+            "出题与点评两次请求共用的 system 角色：既管「题只用英文、只出自这篇稿子」，"
+            "也管「只提问不评判、点评只两三句话」。",
             "保存后下一次出题生效"),
         PromptField("qa_context", "导师提问 · 输入材料段",
             _join([
-                "演讲主题：",
+                "Speech topic:",
                 "{topic}",
                 "",
-                "演讲要求：",
+                "The brief the candidate was given:",
                 "{requirements}",
                 "",
-                "本次评价结果（JSON）：",
+                "Finished evaluation (JSON):",
                 "{result}",
                 "",
-                "演讲稿全文/转写节选：",
+                "Transcript of this speech — the only material you may question, between <<< >>>:",
                 "<<<",
                 "{transcript}",
                 ">>>",
                 "",
-                "请输出 JSON：",
+                "Output JSON:",
                 "{schema}",
             ]),
-            "{topic} = 演讲主题，{requirements} = 老师要求，{result} = 已定的评价结果，"
+            "{topic} = 演讲主题，{requirements} = 老师要求，{result} = 已定的评价结果（用来挑薄弱处出题），"
             "{transcript} = 稿件全文（超长会被截断），{schema} = 下面的出题结构。",
             "五个占位符缺一不可；删掉 {result} 模型就看不到薄弱维度，题目会飘成通用题",
             tokens=("topic", "requirements", "result", "transcript", "schema"), strict_braces=True),
         PromptField("qa_schema", "导师提问 · 输出结构",
             _join([
                 "{",
-                '  "questions": ["共 3 条，每条一道中文思考题，不超过 80 字"]',
+                '  "questions": ["exactly 2 items, each one open-ended follow-up question in English '
+                '(no translation), at most 60 words, anchored in a specific point of the transcript above, '
+                'worded as a question only — no evaluation"]',
                 "}",
             ]),
-            "这份 JSON 骨架决定报告页「导师提问」能不能显示出 3 道题，改字段名要连同出题代码一起改。",
+            "这份 JSON 骨架决定报告页「导师提问」能不能显示出 2 道英文题，改字段名要连同出题代码一起改。",
             "键名改了 → 出题失败并回退到内置兜底题",
             must_contain=('"questions"',)),
         PromptField("qa_review_context", "导师点评 · 输入材料段",
             _join([
-                "以下是一位学生对导师提问的作答：",
+                "The candidate answered the tutor's questions as follows:",
                 "{qa}",
                 "",
-                "请按题序输出 JSON：",
+                "Output JSON, one comment per question, in the same order:",
                 "{schema}",
             ]),
-            "{qa} = 编号后的「问题 / 学生作答」文本块（三题一次送评），{schema} = 下面的点评结构。",
+            "{qa} = 编号后的「问题 / 学生作答」文本块（两题一次送评），{schema} = 下面的点评结构。",
             "删掉 {qa} 模型读不到作答，只能凭空客套",
             tokens=("qa", "schema"), strict_braces=True),
         PromptField("qa_review_schema", "导师点评 · 输出结构",
             _join([
                 "{",
-                '  "comments": ["共 3 条，与问题同序，每条两三句话（不超过 90 字），'
-                '先肯定再指出不足，不要复述学生原话"]',
+                '  "comments": ["共 2 条，与问题同序，每条两三句中文（不超过 90 字），'
+                '只讲这份作答哪里站得住、哪里还欠一层，不要复述学生原话，不要评判口语好坏"]',
                 "}",
             ]),
             "点评按题序返回，条数与题目数不一致时整批回退到兜底文案。",
             "键名改了 → 点评失败并回退到内置兜底文案",
             must_contain=('"comments"',)),
+    )),
+    ("文字稿修订", "把 ASR 转写稿的错字与口误整理成逐条 diff 建议，学生确认后才改稿 —— 五条红线由代码硬卡。", (
+        PromptField("revise_head", "修订 · 材料段与硬性规则",
+            _join([
+                "你是英语演讲课的文字编辑。下面是学生演讲的 ASR 转写稿，"
+                "请只挑出值得修改的地方并以 diff 条目形式提出 —— 不要返回整篇改后稿。",
+                "",
+                "演讲主题：{topic}",
+                "老师要求：{requirements}",
+                "术语提示（可能被听错的人名/专有名词，可为空）：{glossary}",
+                "",
+                "转写稿（唯一依据，原文在 <<< >>> 之间）：",
+                "<<<",
+                "{transcript}",
+                ">>>",
+                "",
+                "硬性规则（程序会逐条执行，越界的条目会被直接丢弃）：",
+                "1. before 必须逐字摘自原文、能在全篇唯一对上位置；不许改写、不许编造原文里没有的句子；",
+                "2. 每条只改一小处，before 与 after 的字符数之差不得超过 20；",
+                "3. 数字、时间、人名、地名等事实信息必须前后完全一致，一个字符都不许变；",
+                "4. 不许新增句子：after 里句末标点（。！？）的数量不得多于 before；",
+                "5. style 条目只在与主题呼应时提，只调词不改意，宁缺毋滥；",
+                "6. filler 只删口头禅与无意义重复，不得删掉有含义的内容；",
+                "7. 拿不准就不提 —— 错误的建议比没有建议更糟。",
+            ]),
+            "{topic} {requirements} {glossary} {transcript} 由系统注入；glossary 是学生在页面上填的术语提示。",
+            "规则 1~4 是代码里的红线 R1~R4 的镜像，改提示词不会放松代码校验；"
+            "「不要返回整篇改后稿」这句删掉会诱导模型越权",
+            tokens=("topic", "requirements", "glossary", "transcript"), strict_braces=True),
+        PromptField("revise_tail", "修订 · 输出指令",
+            _join([
+                "只输出一个 JSON，结构如下：",
+                "{schema}",
+                "kind 字段只能取下列值（等号前是代码认的键名）：",
+                "{kinds}",
+                "没有值得改的地方就让 items 为空数组，不要硬凑。",
+            ]),
+            "{kinds} = 系统注入的类型清单，{schema} = 系统生成的输出结构。",
+            "占位符缺一个就没有可解析的建议；改了 items/before/after 等键名要连同修订代码一起改",
+            tokens=("kinds", "schema"), strict_braces=True),
+    )),
+    ("朗读合成", "在线 TTS 示范朗读的两级拼装：先用 tts_style 从主题推断情感演绎（第一级），"
+                 "再由 tts_instructions 把推断结果与现场/语速/短板拼成最终朗读指令（第二级，纯字符串）。", (
+        PromptField("tts_style", "朗读 · 主题情感推断",
+            _join([
+                "你是英语演讲课的朗读指导。请根据下面这场演讲的主题、要求与现场，"
+                "推断示范朗读应有的演绎方式。只输出一个 JSON，别的一切文字都不要，"
+                "四个字段合计不超过 80 字。",
+                "",
+                "演讲主题：{topic}",
+                "老师要求：{requirements}",
+                "朗读现场：{scene}",
+                "稿件开头（只用于判断情绪走向，不要复述内容）：",
+                "<<<",
+                "{opening}",
+                ">>>",
+                "",
+                "输出结构：",
+                '{"tone": "情感基调", "pace_band": "相对语速档", '
+                '"structure": "逐句演绎脚本", "avoid": "要避免的演法"}',
+                "",
+                "硬性规则：",
+                "1. structure 必须逐句点节奏（例如：设问句后停顿留白；短句斩钉截铁；"
+                "排比层层递进、一句比一句高；情绪顶点延长；结尾一字一顿放慢收束），"
+                "不许堆抽象形容词；",
+                "2. pace_band 只用相对说法（如「整体偏快、结尾明显放慢」），"
+                "禁止「每分钟多少字」这类绝对数值；",
+                "3. 只描述怎么朗读，不评价稿件内容好坏。",
+            ]),
+            "{topic} {requirements} {scene} {opening} 由系统注入；opening 是成稿前 200 字。"
+            "四个键名 tone/pace_band/structure/avoid 是解析契约。",
+            "推断失败或超时不会阻塞合成：系统降级为中性新闻腔基线；"
+            "改了键名会导致解析失败、每次都用降级文案",
+            tokens=("topic", "requirements", "scene", "opening"),
+            must_contain=('"tone"', '"pace_band"', '"structure"', '"avoid"'),
+            strict_braces=True),
+        PromptField("tts_instructions", "朗读 · 演绎指令拼装",
+            _join([
+                "这是一次面向英语演讲课的示范朗读。请逐字忠实朗读文稿，不增删改动任何文字，"
+                "按下面的要求演绎。",
+                "现场：{scene}。",
+                "情感基调：{tone}。",
+                "逐句演绎：{structure}。",
+                "节奏：{pace}。",
+                "重点：{focus}。",
+            ]),
+            "{scene} = 朗读现场的说法（课堂展示/演讲比赛/毕业答辩/工作汇报），{tone} 与 "
+            "{structure} 来自上一块的推断结果，{pace} = 与学生原速比较后的相对语速档 + "
+            "推断出的 pace_band，{focus} = 针对 fluency/delivery 短板的示范导向。",
+            "这一段会随每个分块重复发送并计入 characters 计费，改长了会抬高成本；"
+            "删掉某个占位符等于放弃该维度对朗读的影响",
+            tokens=("scene", "tone", "structure", "pace", "focus"), strict_braces=True),
     )),
 )
 

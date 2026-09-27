@@ -12,7 +12,9 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import analyze, compress, db, face as face_mod, media, transcribe
+from . import analyze, compress, db, face as face_mod, media, revise, transcribe
+from . import tts as tts_mod
+from . import voice as voice_mod
 from .analyze import Aggregated, TimingCheck
 from .config import settings
 from .qwen import QwenClient, QwenError
@@ -283,6 +285,250 @@ def run_analysis(video_id: int, rubric: Rubric = DEFAULT_RUBRIC) -> dict:
     return report
 
 
+def propose_script(video_id: int, glossary: str = "",
+                   client: QwenClient | None = None,
+                   progress=None) -> revise.RevisionResult:
+    """生成文字稿修订建议：按需一次调用，建议进 script_items，绝不碰原稿（方案 §5）。
+
+    与导师出题同属「分析完成后的按需调用」，用量走 db.add_usage 增量记账；
+    client 缺省时现建，自测注入桩即可不触网。成稿与否由学生决定，落在路由层。
+    progress 是 (百分比, 阶段文案) 回调，由后台任务传入用于页面轮询显示。
+    """
+    video = db.get_video(video_id)
+    transcript = video["transcript"] or ""
+    own_client = client is None
+    # 比对全稿是整条链路最慢的一次调用（实测 1600 字稿子 349 秒），沿用请求超时的
+    # 180 秒会被读超时掐死在 35%，所以单独给一条更宽的预算；重试也收成 2 次——
+    # 超时多半是模型真在慢慢想，再打三次只会白等半小时、白付三倍 token。
+    cli = client or QwenClient(timeout=settings.revise_timeout, retries=2).mark("文字稿修订")
+
+    def report(pct: int, phase: str) -> None:
+        if progress is not None:
+            progress(pct, phase)
+
+    report(15, "通读文字稿 · 准备术语与红线约束")
+    notes: list[str] = []
+    try:
+        report(35, "调用模型比对全稿（本步最慢，一千字上下要五六分钟，别关页面）")
+        result = revise.run_revision(cli, transcript, video["topic"] or "",
+                                     video["requirements"] or "",
+                                     glossary=glossary.strip(), note=notes)
+        report(75, "校验红线：只允许改错字与术语，越界条目自动丢弃")
+    finally:
+        if own_client:
+            db.add_usage(video_id, cli.usage_summary())
+    meta = {"source_hash": revise.source_hash(transcript), "model": result.model,
+            "glossary": glossary.strip(), "dropped": result.dropped[:20],
+            "warnings": result.warnings, "notes": notes, "proposed_at": db.now()}
+    report(90, "写入建议清单")
+    db.update_video(video_id, script_status="proposed",
+                    script_items=revise.items_to_json(result.items),
+                    script_text="", script_meta=meta)
+    return result
+
+
+def _propose_failed(video_id: int, exc: BaseException) -> None:
+    """修订失败的落库口径：把英文超时报错翻译成可操作的中文。
+
+    原样落「HTTPSConnectionPool(host=...) Read timed out. (read timeout=180)」时，
+    学生看到的是一串英文栈，而里面唯一有用的线索（超时秒数）恰好是管理员该调的旋钮。
+    这里既说清「稿子长属正常、可以再点一次」，也指出「修订请求超时」在哪调。
+    """
+    raw = f"{type(exc).__name__}: {exc}"
+    if "timeout" in raw.lower() or "timed out" in raw.lower():
+        raw = (f"模型比对全稿超过 {settings.revise_timeout} 秒仍未返回，本次生成中断"
+               f"（原始报错：{raw[:160]}）。稿子偏长时属正常，可以重新点一次；"
+               f"若反复超时，请管理员在设置页调大「修订请求超时」")
+    db.update_video(video_id, script_status="failed", script_error=raw[:1500],
+                    stage="修订建议生成失败", progress=100)
+
+
+def run_propose(video_id: int, glossary: str = "") -> revise.RevisionResult:
+    """修订建议后台任务：与朗读合成同一范式，页面靠 /status 轮询看进度。
+
+    同步等模型是云端 504 的根因——网关先超时断连，后端却仍把结果写进了库，
+    所以用户表现为「报 504，但过一会儿刷新结果在」。改成后台任务后浏览器
+    立刻拿到跳转，进度与失败原因都落库，不再依赖一条长连接。
+    status 全程保持 done：修订是评价完成后的按需动作，不能把页面打回进度视图。
+    """
+    db.update_video(video_id, script_status="running", script_error="",
+                    stage="排队等待修订", progress=5)
+
+    def report(pct: int, phase: str) -> None:
+        db.update_video(video_id, stage=phase, progress=max(5, min(99, pct)))
+
+    try:
+        result = propose_script(video_id, glossary, progress=report)
+        db.update_video(video_id, stage="修订建议已生成", progress=100)
+        return result
+    except Exception as exc:  # noqa: BLE001 - 兜底记录后原样上抛给 _job_worker
+        _propose_failed(video_id, exc)
+        raise
+
+
+def run_propose_error(video_id: int, exc: BaseException) -> None:
+    """修订任务的 _job_worker 兜底：失败只写修订侧状态。
+
+    兜底若不指定落点，_job_worker 会按最早的调用方（朗读合成）写 tts_status，
+    于是「修订建议超时」会被显示成「上次朗读合成失败」——两件事互不相干，
+    学生看到一条从没跑过的朗读失败记录，只会去找根本不存在的音频问题。
+    """
+    _propose_failed(video_id, exc)
+
+
+def run_tts(video_id: int, scene: str = "class", use_clone: bool = False) -> Path:
+    """按需合成朗读示范（方案 §6.4）：闸门 → 生效稿 → 两级拼装 → 逐块合成下载 → 拼接落盘。
+
+    videos.status 全程保持 done——合成是评价完成后的按需动作，不能把页面打回进度视图，
+    所以进度只写 stage/progress 两列，结果落在 tts_status/tts_path/tts_meta 三列。
+    use_clone=True 时改用本人的复刻音色（方案 §9）：音色与模型成对取出，缺一个就报
+    人话错误，而不是把空音色递给接口让它回一句看不懂的 400。
+    """
+    video = db.get_video(video_id)
+    if video is None:
+        raise RuntimeError(f"视频 {video_id} 不存在")
+    text = (video["script_text"] or "").strip() or (video["transcript"] or "").strip()
+    ok, why = tts_mod.tts_feasibility(text)
+    if not ok:
+        raise tts_mod.TtsError(why)
+    voice, vmodel = "", ""
+    if use_clone:
+        voice, vmodel = db.user_voice_for_tts(int(video["user_id"]))
+        if not voice:
+            raise tts_mod.TtsError("这个账号还没有可用的复刻音色，请先完成授权并创建音色")
+    sc = scene if scene in tts_mod.SCENES else "class"
+    out_dir = _artifact_dir(video_id) / "tts"
+    db.update_video(video_id, tts_status="running", tts_error="",
+                    stage="排队等待合成" if not voice else "排队等待合成（本人音色）", progress=5)
+    client = QwenClient().mark("朗读合成")
+    try:
+        def report(pct: int, phase: str) -> None:
+            db.update_video(video_id, stage=phase, progress=max(5, min(99, pct)))
+
+        result = tts_mod.synthesize(client, text, out_dir=out_dir, scene=sc,
+                                    topic=video["topic"] or "",
+                                    requirements=video["requirements"] or "",
+                                    dims=db.dims_for_video(video_id),
+                                    duration=float(video["duration"] or 0.0),
+                                    voice=voice, model=vmodel, progress=report)
+        meta = result.to_meta()
+        meta["scene"] = sc
+        meta["warnings"] = result.warnings
+        meta["synthesized_at"] = db.now()
+        db.update_video(video_id, tts_status="done",
+                        tts_path=str(result.path.relative_to(out_dir.parent)).replace("\\", "/"),
+                        tts_meta=meta, tts_error="",
+                        stage="朗读合成完成", progress=100)
+        return result.path
+    except Exception as exc:  # noqa: BLE001 - 兜底记录后原样上抛给 _job_worker
+        db.update_video(video_id, tts_status="failed",
+                        tts_error=f"{type(exc).__name__}: {exc}"[:1500],
+                        stage="朗读合成失败", progress=100)
+        raise
+    finally:
+        db.add_usage(video_id, client.usage_summary())
+
+
+def _voice_dir(user_id: int) -> Path:
+    """复刻样本目录按账号存，不放 artifact_dir/<video_id>：删视频会把那棵树整个 rmtree，
+    正在跑的复刻任务会在读完样本之后、送出请求之前凭空丢文件。"""
+    p = settings.data_dir / "voices" / str(user_id)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _drop_samples(user_id: int) -> None:
+    """样本是学生人声的原样，用完即删；删不掉也不拦流程（下次同名覆盖）。"""
+    for p in _voice_dir(user_id).glob("*.wav"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+def run_voice(video_id: int) -> str:
+    """账号级声音复刻（方案 §9）：从提交时所在视频挑一段连续朗读 → 建音色 → 写回账号。
+
+    音色属于用户不属于视频，但进度借用该视频的 stage/progress 两列上报，页面就能沿用
+    现成的 /videos/{id}/status 轮询，不必再造一套机制；「同一账号同时只跑一个复刻任务」
+    靠 db.begin_voice_job 的行级抢锁，路由里的预检只给准信、防不住两个标签页。
+    抢不到锁时只在本视频留一句说明，绝不能去写 error——锁是别人的任务持有的。
+    """
+    video = db.get_video(video_id)
+    if video is None:
+        raise RuntimeError(f"视频 {video_id} 不存在")
+    user_id = int(video["user_id"])
+    if not db.begin_voice_job(user_id):
+        db.update_video(video_id, stage="该账号已有音色复刻任务，本次提交未执行", progress=100)
+        return db.voice_status(user_id)["voice_id"]
+    client = QwenClient().mark("声音复刻")
+    try:
+        def report(pct: int, phase: str) -> None:
+            db.update_video(video_id, stage=phase, progress=max(5, min(99, pct)))
+
+        report(10, "核对录音处理授权")
+        if not db.voice_status(user_id)["consented"]:
+            raise voice_mod.VoiceSampleError("授权已撤回，不能再处理这段录音，请重新勾选授权说明")
+        report(25, "在原视频里挑连续朗读片段")
+        sample, path = voice_mod.build_sample(
+            Path(video["path"]), _voice_dir(user_id) / f"video_{video_id}.wav",
+            duration=float(video["duration"] or 0.0))
+        report(50, f"上传 {sample.duration:.1f} 秒样本（Base64 约 "
+                   f"{voice_mod.estimate_b64_bytes(path) // 1024}KB）建音色")
+        profile = client.create_voice(path, preferred_name=f"u{user_id}_{video['username']}")
+        source = (f"取自视频 #{video_id}《{video['title']}》"
+                  f"{sample.start:.1f}–{sample.end:.1f} 秒")
+        note = ""
+        if profile.fallback_mode:
+            note = ("服务方以降级方式建成音色"
+                    f"（{profile.fallback_reason or '未说明原因'}），"
+                    "相似度可能不足，可重做音色或改用系统音色")
+        db.save_user_voice(user_id, profile.voice, profile.target_model, source=source, note=note)
+        db.update_video(video_id, stage="我的音色已就绪", progress=100)
+        return profile.voice
+    except Exception as exc:  # noqa: BLE001 - 兜底记录后原样上抛给 _job_worker
+        db.mark_voice_error(user_id, f"{type(exc).__name__}: {exc}")
+        db.update_video(video_id, stage="音色复刻失败", progress=100)
+        raise
+    finally:
+        _drop_samples(user_id)
+        db.add_usage(video_id, client.usage_summary())
+
+
+def run_voice_error(video_id: int, exc: BaseException) -> None:
+    """复刻任务的 _job_worker 兜底：崩在 run_voice 的 try 之外也要留下失败原因。"""
+    video = db.get_video(video_id)
+    if video is not None:
+        db.mark_voice_error(int(video["user_id"]), f"{type(exc).__name__}: {exc}")
+    db.update_video(video_id, stage="音色复刻失败", progress=100)
+
+
+def drop_voice(user_id: int) -> str:
+    """删除本人音色：先删远端、再清本地记录，返回被删除的音色标识。
+
+    顺序很关键——本地记录是「远端还挂着这副嗓子」的唯一线索，先清本地而远端没删掉，
+    就成了永远找不回的孤儿人声。远端报 404 说明本来就没有，按删除成功处理，
+    否则用户点了删除却永远删不动。
+
+    演示模式（没有密钥）压根不可能建出远端音色，这时只清本地记录：
+    不然删一次就报一次网络错，学生永远撤不回授权。
+    """
+    st = db.voice_status(user_id)
+    voice = st["voice_id"]
+    client = QwenClient()
+    if voice and client.enabled:
+        client.mark("音色删除")
+        try:
+            client.delete_voice(voice, st["voice_model"] or st["target_model"])
+        except QwenError as exc:
+            if exc.status != 404:
+                db.mark_voice_error(user_id, f"远端音色删除失败：{type(exc).__name__}: {exc}")
+                raise
+    db.clear_user_voice(user_id)
+    _drop_samples(user_id)
+    return voice
+
+
 def client_key_model() -> str:
     return "mock" if not settings.real_mode else settings.chat_model
 
@@ -367,6 +613,34 @@ def enqueue(video_id: int) -> bool:
     _active.add(video_id)
     db.set_progress(video_id, "queued", "排队中", 3)
     _pool_instance().submit(_worker, video_id)
+    return True
+
+
+def _job_worker(fn, video_id: int, on_error=None) -> None:
+    try:
+        fn(video_id)
+    except Exception as exc:  # noqa: BLE001 - 按需任务失败必须兜底留痕
+        traceback.print_exc()
+        try:
+            # 每个任务自己已经在 except 里写过状态；这里按 on_error 指定的落点兜底，
+            # 缺省仍按朗读合成处理，避免把旧的 tts 调用点一并改坏。
+            if on_error is not None:
+                on_error(video_id, exc)
+            else:
+                db.update_video(video_id, tts_status="failed",
+                                tts_error=f"{type(exc).__name__}: {exc}"[:1500])
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+    finally:
+        _active.discard(video_id)
+
+
+def submit(fn, video_id: int, on_error=None) -> bool:
+    """提交按需后台任务（朗读合成、修订建议），与分析共用 _active：一个视频同时只跑一件事。"""
+    if video_id in _active:
+        return False
+    _active.add(video_id)
+    _pool_instance().submit(_job_worker, fn, video_id, on_error)
     return True
 
 

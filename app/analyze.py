@@ -638,6 +638,8 @@ def _clean_suggestions(raw, agg: dict) -> list[dict]:
 
 # ------------------------------------------------------------------ 导师提问
 QA_ANSWER_FALLBACK = "已收到你的作答，建议结合报告中的改进建议再补充一层论证。"
+# 题数写在这里一处：出题、兜底、校验、页面文案都从这里取，改题目数不会只改一半。
+QA_QUESTION_COUNT = 2
 _QA_DROP_KEYS = ("frames", "stamps", "face", "transcript_excerpt")
 
 
@@ -648,49 +650,60 @@ def _ratio_key(d: dict) -> float:
         return 0.0
 
 
+QA_QUESTION_LIMIT = 260
+
+
+def _question(head: str, tail: str) -> str:
+    """把可变内容（主题、改进建议、维度名）压在 head 里，固定问句 tail 永远完整，
+    长度超限时从 head 裁，问号和问句不会被截断。"""
+    head = " ".join(head.split())
+    budget = QA_QUESTION_LIMIT - len(tail) - 1
+    if budget < 20:
+        return " ".join(tail.split())
+    if len(head) > budget:
+        head = head[:budget].rstrip(" ,;:.") + "…"
+    return " ".join((head + tail).split())
+
+
 def fallback_questions(report: dict, topic: str) -> list[str]:
-    """不依赖模型的兜底出题：改进建议 + 最弱维度拼 3 道思考题，永远返回 3 条。"""
-    name = (topic or "").strip() or "本次演讲"
+    """不依赖模型的兜底出题：用评价结果里的最弱维度与改进建议拼英文追问，永远返回 2 条。"""
+    name = (topic or "").strip() or "this speech"
     dims = [d for d in (report.get("dimensions") or []) if isinstance(d, dict)]
-    weak = [str(d.get("name") or "").strip() for d in sorted(dims, key=_ratio_key)[:2]]
-    weak = [d for d in weak if d]
+    thin = [str(d.get("name_en") or d.get("name") or "").strip()
+            for d in sorted(dims, key=_ratio_key)[:2]]
+    thin = [w for w in thin if w]
     out: list[str] = []
-    for s in [x for x in (report.get("suggestions") or []) if isinstance(x, dict)][:2]:
+    for s in [x for x in (report.get("suggestions") or []) if isinstance(x, dict)][:1]:
         action = str(s.get("action") or "").strip()
-        dim = str(s.get("dimension") or "").strip()
         if action:
-            out.append(f"关于{('「' + dim + '」') if dim else '这篇稿件'}，建议里让你「{action[:60]}」，"
-                       f"你在《{name}》里打算改哪一句？为什么这样改？")
-        elif dim:
-            out.append(f"你在「{dim}」这一项还有差距，重讲《{name}》时你会怎么补强？请举一处具体改法。")
-    for dim in weak:
-        out.append(f"「{dim}」是这篇稿子相对最薄弱的一项，讲《{name}》时你哪一处最没底？打算怎么练？")
-    out.append(f"如果只能改《{name}》的三段内容里的一个词，你会改哪个？请说出你的取舍理由。")
+            out.append(_question(f"You are asked to {action} in {name}.",
+                                 " Which exact sentence does that touch, and what makes it the right "
+                                 "call rather than another one?"))
+    if thin:
+        out.append(_question(f"Of the parts of {name}, {thin[0]} carries the least weight right now.",
+                             " Point at the line that shows it — what is that line actually doing "
+                             "for your argument?"))
+    out.append(_question(f"In {name}, pick the claim a listener is most likely to push back on.",
+                         " What would you say to them, here and now?"))
+    out.append(_question(f"Take the example you used in {name}.",
+                         " If someone said it proves nothing, where would you start in defending it?"))
+    out.append(_question(f"There is one line in {name} your whole talk leans on.",
+                         " Say it again for us — why does everything else depend on it?"))
     seen: list[str] = []
     for q in out:
-        q = q.strip()[:160]
         if q and q not in seen:
             seen.append(q)
-    pad = [
-        f"关于《{name}》，你最想让听众记住哪一句？这句现在够不够有说服力？",
-        f"《{name}》的开头三句，重讲一遍你会换掉哪一句？为什么？",
-        f"讲《{name}》时你自己觉得最像在读稿的是哪一段？打算怎么处理？",
-    ]
-    for q in pad:
-        if len(seen) >= 3:
-            break
-        seen.append(q)
-    return seen[:3]
+    return seen[:QA_QUESTION_COUNT]
 
 
 def build_questions(client: QwenClient, rubric: Rubric, report: dict, transcript: str,
                     topic: str, requirements: str = "",
                     note: list[str] | None = None) -> list[str]:
-    """评价完成后出 3 道针对本稿的思考题；模型不给足 3 条就整批改用兜底题。"""
+    """评价完成后出 2 道针对本稿的英文追问；模型不给足 2 条就整批改用兜底题。"""
     prompt = prompts.render(
         "qa_context",
-        topic=(topic or "").strip() or "本次演讲",
-        requirements=(requirements or "").strip() or "（未填写）",
+        topic=(topic or "").strip() or "this speech",
+        requirements=(requirements or "").strip() or "(none given)",
         result=json.dumps({k: v for k, v in report.items() if k not in _QA_DROP_KEYS},
                           ensure_ascii=False, indent=1),
         transcript=(transcript or "")[:4000],
@@ -699,18 +712,18 @@ def build_questions(client: QwenClient, rubric: Rubric, report: dict, transcript
         comp = client.chat(prompt, system=prompts.get("qa_system"), json_mode=True,
                            temperature=0.5, note=note)
         data = parse_json_block(comp.text or "")
-        got = [str(q).strip()[:300] for q in (data.get("questions") or []) if str(q).strip()] \
+        got = [str(q).strip()[:400] for q in (data.get("questions") or []) if str(q).strip()] \
             if isinstance(data, dict) else []
     except Exception:  # noqa: BLE001 - 出题失败不应影响报告，退回本地题目
         got = []
-    if len(got) < 3:
+    if len(got) < QA_QUESTION_COUNT:
         got = fallback_questions(report, topic)
-    return got[:3]
+    return got[:QA_QUESTION_COUNT]
 
 
 def review_answers(client: QwenClient, report: dict, pairs: list[tuple[str, str]],
                    note: list[str] | None = None) -> list[str]:
-    """三题一次送评，按题序返回点评；条数对不上就整批回兜底文案。"""
+    """若干题一次送评（现为两题），按题序返回中文点评；条数对不上就整批回兜底文案。"""
     if not pairs:
         return []
     fallback = [QA_ANSWER_FALLBACK] * len(pairs)

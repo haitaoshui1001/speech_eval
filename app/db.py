@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS videos (
     frontal_ratio REAL,
     orig_size INTEGER,
     compress_note TEXT NOT NULL DEFAULT '',
+    script_status TEXT NOT NULL DEFAULT '',
+    script_items TEXT NOT NULL DEFAULT '[]',
+    script_text TEXT NOT NULL DEFAULT '',
+    script_meta TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     analyzed_at TEXT
@@ -145,6 +149,20 @@ _EXTRA_VIDEO_COLUMNS = {
     # 原件在压缩成功后即被替换删除，这两个字段是唯一能回溯「原来多大」的地方。
     "orig_size": "INTEGER",
     "compress_note": "TEXT NOT NULL DEFAULT ''",
+    # 文字稿修订：status 记进度（空=未分析），items 是建议清单 JSON 快照，
+    # script_text 为学生确认后生成的定稿，meta 存 source_hash 等回溯信息。
+    "script_status": "TEXT NOT NULL DEFAULT ''",
+    "script_items": "TEXT NOT NULL DEFAULT '[]'",
+    "script_text": "TEXT NOT NULL DEFAULT ''",
+    "script_meta": "TEXT NOT NULL DEFAULT '{}'",
+    # 修订建议改后台任务后新增：同步等待会被网关掐断成 504，失败原因必须自己留痕。
+    "script_error": "TEXT NOT NULL DEFAULT ''",
+    # 朗读合成：status 记进度（空=未合成），path 只存相对 artifact 目录的本地路径
+    # （临时签名 URL 绝不落库），error 存最后一次失败原因，meta 存 text_hash/分块数等回溯信息。
+    "tts_status": "TEXT NOT NULL DEFAULT ''",
+    "tts_path": "TEXT NOT NULL DEFAULT ''",
+    "tts_error": "TEXT NOT NULL DEFAULT ''",
+    "tts_meta": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 # 上传配额同样要补列：upload_limit 可空，NULL 表示「跟随全局 USER_UPLOAD_LIMIT」，
@@ -152,6 +170,21 @@ _EXTRA_VIDEO_COLUMNS = {
 _EXTRA_USER_COLUMNS = {
     "upload_used": "INTEGER NOT NULL DEFAULT 0",
     "upload_limit": "INTEGER",
+    # 声音复刻：音色按用户存、长期复用。voice_id 是百炼返回的音色标识，
+    # voice_model 记录建音色时绑定的合成模型——官方要求合成模型与 target_model
+    # 完全一致，所以换模型时靠这个字段判定旧音色作废、需要重建。
+    "voice_id": "TEXT NOT NULL DEFAULT ''",
+    "voice_model": "TEXT NOT NULL DEFAULT ''",
+    "voice_created_at": "TEXT NOT NULL DEFAULT ''",
+    "voice_error": "TEXT NOT NULL DEFAULT ''",
+    # 声音属个人敏感信息：未同意不得调用复刻接口。记同意时间而不是只记布尔，
+    # 万一有争议能说清「什么时候授的权、什么时候撤的」。
+    "voice_consent_at": "TEXT NOT NULL DEFAULT ''",
+    # 样本出处（视频 #id + 文件名 + 起止秒）。只留回溯线索，样本音频本身不长期落盘。
+    "voice_source": "TEXT NOT NULL DEFAULT ''",
+    # 复刻任务状态（''/running/done/failed）。必须落库而不是只记在内存里：
+    # 建音色是后台任务，进程重启后若没有这条状态，页面既不知道任务死了，也拦不住重复提交。
+    "voice_status": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -323,6 +356,133 @@ def delete_user(user_id: int) -> None:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
+# ---------------- 声音复刻 ----------------
+_VOICE_SELECT = ("SELECT voice_id, voice_model, voice_created_at, voice_error, "
+                 "voice_consent_at, voice_source, voice_status FROM users WHERE id = ?")
+
+
+def _voice_row(conn, user_id: int) -> sqlite3.Row | None:
+    return conn.execute(_VOICE_SELECT, (user_id,)).fetchone()
+
+
+def voice_status(user_id: int) -> dict:
+    """音色状态：页面据此决定「能不能按本人音色合成、要不要重做、授权有没有留痕」。
+
+    stale 是这里唯一的判断难点：音色跟 target_model 死绑，管理员一旦改了
+    TTS_VC_MODEL，老音色仍躺在库里但拿去合成必然报错，所以提前判成作废、
+    提示重做，而不是让学生在第 3 步失败后自己去猜原因。
+    """
+    with get_conn() as conn:
+        row = _voice_row(conn, user_id)
+    target = (settings.tts_vc_model or "").strip().lower()
+    if row is None:
+        return {"consented": False, "consent_at": "", "has_voice": False, "usable": False,
+                "stale": False, "status": "", "voice_id": "", "voice_model": "",
+                "created_at": "", "error": "", "source": "", "target_model": target}
+    model = (row["voice_model"] or "").strip().lower()
+    has = bool(row["voice_id"])
+    stale = has and bool(model) and model != target
+    return {
+        "consented": bool(row["voice_consent_at"]),
+        "consent_at": row["voice_consent_at"] or "",
+        "has_voice": has,
+        "usable": has and not stale,
+        "stale": stale,
+        "status": row["voice_status"] or "",
+        "voice_id": row["voice_id"] or "",
+        "voice_model": model,
+        "created_at": row["voice_created_at"] or "",
+        "error": row["voice_error"] or "",
+        "source": row["voice_source"] or "",
+        "target_model": target,
+    }
+
+
+def user_voice_for_tts(user_id: int) -> tuple[str, str]:
+    """合成取音色：返回 (voice, 绑定模型)。没授权、没音色、或音色已因换模型作废 → 空串。
+
+    把判定收在存储层，是为了让朗读合成那边只问一句「这个账号能不能用自己的音色」，
+    不必在业务代码里重复写「比对 TTS_VC_MODEL」这种容易漏掉一条的规则。
+    """
+    st = voice_status(user_id)
+    if not st["consented"] or not st["usable"]:
+        return "", ""
+    return st["voice_id"], st["voice_model"]
+
+
+def set_voice_consent(user_id: int, agreed: bool) -> dict:
+    """登记/撤回声音处理授权，返回最新状态供页面直接渲染。
+
+    同意是幂等的：已授权就保留第一次的时间戳，不被重复勾选刷新。
+    撤回则连音色记录一起抹掉——没有授权就没有继续保留音色的理由。
+    远端音色不在这个函数里删，删除要带 voice 标识走接口，由调用方安排。
+    """
+    with get_conn() as conn:
+        if agreed:
+            conn.execute("UPDATE users SET voice_consent_at = ? "
+                         "WHERE id = ? AND voice_consent_at = ''", (now(), user_id))
+        else:
+            conn.execute(
+                "UPDATE users SET voice_consent_at = '', voice_id = '', voice_model = '', "
+                "voice_created_at = '', voice_error = '', voice_source = '', voice_status = '' "
+                "WHERE id = ?", (user_id,))
+    return voice_status(user_id)
+
+
+def begin_voice_job(user_id: int) -> bool:
+    """抢占复刻任务位：只有当前不在 running 才置位，返回是否抢到。
+
+    直接 UPDATE ... WHERE voice_status <> 'running' 再看影响行数，是为了避开
+    「先读再写」的竞态——同一账号两个标签页同时点重做，会建出两个音色，
+    而库里只记得后一个，前一个就成了挂在服务方那边的孤儿人声。
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE users SET voice_status = 'running', voice_error = '' "
+            "WHERE id = ? AND voice_status <> 'running'", (user_id,))
+        return cur.rowcount > 0
+
+
+def save_user_voice(user_id: int, voice_id: str, voice_model: str, source: str = "",
+                    note: str = "") -> None:
+    """复刻成功：写入音色与绑定模型，清掉上一次的失败原因，任务状态转 done。
+
+    note 是给「音色建成了但服务方是降级建的」这类非致命提示留的位置，复用
+    voice_error 列而不是再加一列：页面本来就渲染这一栏，只是按 status 决定
+    措辞是「失败」还是「提醒」。
+    """
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET voice_id = ?, voice_model = ?, voice_created_at = ?, "
+            "voice_error = ?, voice_source = ?, voice_status = 'done' WHERE id = ?",
+            (voice_id, (voice_model or "").strip().lower(), now(), note[:1500], source, user_id))
+
+
+def mark_voice_error(user_id: int, error: str, status: str = "failed") -> None:
+    """复刻失败：只留原因和状态，不动已有音色。
+
+    上次建成的音色照样能用，若因为这次重做失败就清空，等于把可用资产连带毁掉，
+    学生反而退回系统音色却不知道为什么。
+    """
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET voice_error = ?, voice_status = ? WHERE id = ?",
+                     ((error or "")[:1500], status, user_id))
+
+
+def clear_user_voice(user_id: int) -> str:
+    """清掉本地音色记录，返回被清除的 voice 标识，供调用方去远端删除。
+
+    先读后清是刻意的顺序：本地记录是「远端还挂着我的人声」的唯一线索，
+    清完再想知道就没了。授权时间戳不在清除范围内——它是合规留痕，不是音色数据。
+    """
+    with get_conn() as conn:
+        row = _voice_row(conn, user_id)
+        conn.execute(
+            "UPDATE users SET voice_id = '', voice_model = '', voice_created_at = '', "
+            "voice_error = '', voice_source = '', voice_status = '' WHERE id = ?", (user_id,))
+    return (row["voice_id"] if row is not None else "") or ""
+
+
 # ---------------- videos ----------------
 def create_video(user_id: int, title: str, filename: str, path: str, size: int,
                  topic: str = "", requirements: str = "") -> int:
@@ -485,25 +645,66 @@ def admin_dim_stats(topic: str = "") -> dict:
 
 
 def _merge_usage_axis(prev, new) -> list[dict]:
-    """合并两份 by_stage / by_model 明细，按 name 相加后按 token 倒序。"""
+    """合并两份 by_stage / by_model 明细，按 name 相加后按 token 倒序。
+
+    characters 单独一列：朗读合成按字符计费、token 恒为 0，不带这一列的话
+    「朗读合成」在明细表里会是一行全 0，看着像没记账。
+    creations 同理：建一次音色既不烧 token 也不按字符，只按次收费。
+    """
     table: dict[str, dict] = {}
     for item in list(prev or []) + list(new or []):
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "—")
         row = table.setdefault(name, {"name": name, "calls": 0, "prompt": 0,
-                                      "completion": 0, "total": 0, "estimated": 0})
-        for k in ("calls", "prompt", "completion", "total", "estimated"):
+                                      "completion": 0, "total": 0, "estimated": 0,
+                                      "characters": 0, "creations": 0})
+        for k in ("calls", "prompt", "completion", "total", "estimated", "characters",
+                  "creations"):
             row[k] += int(item.get(k) or 0)
-    return sorted(table.values(), key=lambda x: -x["total"])
+    return sorted(table.values(), key=lambda x: (-x["total"], -x["characters"], -x["creations"]))
+
+
+def _usage_detail(raw) -> dict:
+    """解 videos.token_detail。列里存的是 usage_summary 原文，坏数据一律当空账处理。"""
+    try:
+        val = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        val = {}
+    return val if isinstance(val, dict) else {}
+
+
+def video_usage(video) -> dict:
+    """单条视频的用量视图：列上的总量 + token_detail 里的阶段明细。
+
+    合计以列为准（_flush_usage 与 add_usage 都写列），明细只用于按阶段拆分；
+    characters 只存在于明细里，所以朗读合成的花费必须走这里才看得见。
+    入参收 sqlite3.Row 或 dict 均可。
+    """
+    row = dict(video)
+    detail = _usage_detail(row.get("token_detail"))
+    stages = [s for s in (detail.get("by_stage") or []) if isinstance(s, dict)]
+    stages.sort(key=lambda x: (-int(x.get("total") or 0), -int(x.get("characters") or 0)))
+    return {
+        "calls": int(row.get("api_calls") or detail.get("calls") or 0),
+        "prompt": int(row.get("prompt_tokens") or 0),
+        "completion": int(row.get("completion_tokens") or 0),
+        "total": int(row.get("total_tokens") or 0),
+        "estimated_calls": int(detail.get("estimated_calls") or 0),
+        "characters": int(detail.get("characters") or 0),
+        "creations": int(detail.get("creations") or 0),
+        "by_stage": stages,
+    }
 
 
 def add_usage(video_id: int, usage: dict) -> dict:
-    """把一次按需调用（导师出题、作答点评）的用量累加进视频行，返回合并结果。
+    """把一次按需调用（导师出题、作答点评、文字稿修订、朗读合成）的用量累加进视频行，返回合并结果。
 
     pipeline._flush_usage 是覆盖写：它汇总的是贯穿整条流水线的那个 client 的全部记录，
     所以只在分析阶段用。分析完成后另起 client 调模型时只能走这里做增量合并，
     否则会把分析阶段已经记下的 token 统计整段抹掉。
+    characters（朗读合成按字符计费）与 token 分轴并存，两条轴都要合并，否则后一次
+    按需调用会把前一次的字符数冲掉。
     """
     calls = int((usage or {}).get("calls") or 0)
     if not calls:
@@ -514,18 +715,15 @@ def add_usage(video_id: int, usage: dict) -> dict:
             "FROM videos WHERE id = ?", (video_id,)).fetchone()
     if row is None:
         return {}
-    try:
-        prev = json.loads(row["token_detail"] or "{}")
-    except json.JSONDecodeError:
-        prev = {}
-    if not isinstance(prev, dict):
-        prev = {}
+    prev = _usage_detail(row["token_detail"])
     merged = {
         "calls": int(row["api_calls"] or 0) + calls,
         "prompt": int(row["prompt_tokens"] or 0) + int(usage.get("prompt") or 0),
         "completion": int(row["completion_tokens"] or 0) + int(usage.get("completion") or 0),
         "total": int(row["total_tokens"] or 0) + int(usage.get("total") or 0),
         "estimated_calls": int(prev.get("estimated_calls") or 0) + int(usage.get("estimated_calls") or 0),
+        "characters": int(prev.get("characters") or 0) + int(usage.get("characters") or 0),
+        "creations": int(prev.get("creations") or 0) + int(usage.get("creations") or 0),
         "by_stage": _merge_usage_axis(prev.get("by_stage"), usage.get("by_stage")),
         "by_model": _merge_usage_axis(prev.get("by_model"), usage.get("by_model")),
     }
@@ -552,18 +750,13 @@ def token_usage(user_id: int | None = None, per_video: int = 0) -> dict:
         rows = [dict(r) for r in conn.execute(sql, args)]
 
     out = {"analyzed": 0, "calls": 0, "prompt": 0, "completion": 0, "total": 0,
-           "estimated_calls": 0, "by_stage": [], "by_model": [], "by_user": [],
-           "videos": []}
+           "estimated_calls": 0, "characters": 0, "creations": 0,
+           "by_stage": [], "by_model": [], "by_user": [], "videos": []}
     stages: dict[str, dict] = {}
     models: dict[str, dict] = {}
     users: dict[str, dict] = {}
     for r in rows:
-        try:
-            detail = json.loads(r.get("token_detail") or "{}")
-        except json.JSONDecodeError:
-            detail = {}
-        if not isinstance(detail, dict):
-            detail = {}
+        detail = _usage_detail(r.get("token_detail"))
         calls = int(r.get("api_calls") or detail.get("calls") or 0)
         if not calls and not int(r["total_tokens"] or 0):
             continue
@@ -573,44 +766,67 @@ def token_usage(user_id: int | None = None, per_video: int = 0) -> dict:
         out["completion"] += int(r["completion_tokens"] or 0)
         out["total"] += int(r["total_tokens"] or 0)
         out["estimated_calls"] += int(detail.get("estimated_calls") or 0)
+        out["characters"] += int(detail.get("characters") or 0)
+        out["creations"] += int(detail.get("creations") or 0)
         who = f"{r['display_name'] or r['username']}（{r['username']}）"
         bucket = users.setdefault(who, {"name": who, "user_id": r["user_id"], "calls": 0,
-                                        "total": 0, "videos": 0})
+                                        "total": 0, "characters": 0, "creations": 0,
+                                        "videos": 0})
         bucket["calls"] += calls
         bucket["total"] += int(r["total_tokens"] or 0)
+        bucket["characters"] += int(detail.get("characters") or 0)
+        bucket["creations"] += int(detail.get("creations") or 0)
         bucket["videos"] += 1
         for axis, table in (("by_stage", stages), ("by_model", models)):
             for item in detail.get(axis) or []:
                 if not isinstance(item, dict):
                     continue
                 row = table.setdefault(str(item.get("name") or "—"),
-                                        {"name": str(item.get("name") or "—"), "calls": 0,
-                                         "prompt": 0, "completion": 0, "total": 0,
-                                         "estimated": 0})
+                                       {"name": str(item.get("name") or "—"), "calls": 0,
+                                        "prompt": 0, "completion": 0, "total": 0,
+                                        "estimated": 0, "characters": 0, "creations": 0})
                 row["calls"] += int(item.get("calls") or 0)
                 row["prompt"] += int(item.get("prompt") or 0)
                 row["completion"] += int(item.get("completion") or 0)
                 row["total"] += int(item.get("total") or 0)
                 row["estimated"] += int(item.get("estimated") or 0)
+                row["characters"] += int(item.get("characters") or 0)
+                row["creations"] += int(item.get("creations") or 0)
         if len(out["videos"]) < per_video:
             out["videos"].append({"id": r["id"], "title": r["title"], "calls": calls,
                                   "total": int(r["total_tokens"] or 0),
+                                  "characters": int(detail.get("characters") or 0),
+                                  "creations": int(detail.get("creations") or 0),
                                   "estimated": int(detail.get("estimated_calls") or 0),
                                   "analyzed_at": r["analyzed_at"]})
-    out["by_stage"] = sorted(stages.values(), key=lambda x: -x["total"])
-    out["by_model"] = sorted(models.values(), key=lambda x: -x["total"])
+    out["by_stage"] = sorted(stages.values(),
+                             key=lambda x: (-x["total"], -x["characters"], -x["creations"]))
+    out["by_model"] = sorted(models.values(),
+                             key=lambda x: (-x["total"], -x["characters"], -x["creations"]))
     out["by_user"] = sorted(users.values(), key=lambda x: -x["total"])
     out["avg_per_video"] = round(out["total"] / out["analyzed"], 1) if out["analyzed"] else 0
     return out
 
 
 def reset_stale_jobs() -> int:
-    """进程重启后把中断的任务标记为失败，避免永远卡在 analyzing。"""
+    """进程重启后把中断的任务标记为失败，避免永远卡在 analyzing / 朗读 running。"""
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE videos SET status = 'failed', stage = '已中断', error = '服务重启导致任务中断，请重新点击分析', "
             "updated_at = ? WHERE status IN ('queued','transcribing','analyzing')", (now(),))
-        return cur.rowcount
+        cur2 = conn.execute(
+            "UPDATE videos SET tts_status = 'failed', stage = '朗读合成中断', "
+            "tts_error = '服务重启导致合成中断，请重新点击合成', updated_at = ? "
+            "WHERE tts_status = 'running'", (now(),))
+        cur3 = conn.execute(
+            "UPDATE videos SET script_status = 'failed', stage = '修订建议生成中断', "
+            "script_error = '服务重启导致生成中断，请重新点击生成', updated_at = ? "
+            "WHERE script_status = 'running'", (now(),))
+        # 复刻是账号级任务，中断后不能留 running：既拦着用户重做，又让页面一直转圈。
+        cur4 = conn.execute(
+            "UPDATE users SET voice_status = 'failed', "
+            "voice_error = '服务重启导致复刻中断，请重新点击创建我的音色' WHERE voice_status = 'running'")
+        return cur.rowcount + cur2.rowcount + cur3.rowcount + cur4.rowcount
 
 
 # ---------------- evaluations ----------------
@@ -715,7 +931,11 @@ def user_best_worst(user_id: int) -> tuple[dict, dict]:
 
 # ---------------- 导师提问 ----------------
 def save_questions(video_id: int, user_id: int | None, questions: list[str]) -> int:
-    """整组重建提问：空文本跳过、只保留前 3 条，重新出题不累积，旧作答随之作废。"""
+    """整组重建提问：空文本跳过、最多保留 3 条，重新出题不累积，旧作答随之作废。
+
+    3 条是存储层的宽松上限，出题的道数由 analyze.QA_QUESTION_COUNT 决定（当前 2 道）；
+    管理员把提示词改宽时这里不至于悄悄丢题，也不至于无限膨胀。
+    """
     cleaned: list[str] = []
     for text in questions:
         q = (text or "").strip()[:500]

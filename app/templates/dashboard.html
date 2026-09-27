@@ -61,7 +61,9 @@
   <div class="section-title">
     <h2>演讲记录</h2>
     <span>{{ videos | length }} 条 · 已完成 {{ done | length }} 条
-      {%- if usage and usage['calls'] %} · 累计 {{ usage['calls'] }} 次调用 / {{ usage['total'] | n }} token{% endif %}
+      {%- if usage and usage['calls'] %} · 累计 {{ usage['calls'] }} 次调用 / {{ usage['total'] | n }} token
+        {%- if usage.get('characters') %} + {{ usage['characters'] | n }} 字符{% endif %}
+        {%- if usage.get('creations') %} + {{ usage['creations'] }} 次音色{% endif %}{% endif %}
       {%- if done | length >= 2 %} · <a href="/compare">按维度对比 →</a>{% endif %}
     </span>
   </div>

@@ -36,6 +36,8 @@
       <p class="dim-text" style="margin:6px 0 0;font-size:13.5px">
         {% if site_usage['calls'] %}{{ site_usage['analyzed'] }} 次分析 · {{ site_usage['calls'] }} 调用 ·
         均 {{ site_usage['avg_per_video'] | n }}/次
+        {%- if site_usage.get('characters') %} · 合成 {{ site_usage['characters'] | n }} 字符{% endif %}
+        {%- if site_usage.get('creations') %} · 定制 {{ site_usage['creations'] }} 次音色{% endif %}
         {%- if site_usage['estimated_calls'] %} · 含 {{ site_usage['estimated_calls'] }} 次估算{% endif %}
         {% else %}尚无调用记录{% endif %}</p>
     </div>
@@ -227,31 +229,37 @@
 </section>
 
 {% if site_usage['calls'] %}
+{% set chars_total = site_usage.get('characters') or 0 %}
+{% set crea_total = site_usage.get('creations') or 0 %}
 <section class="sheet" data-reveal="{{ [lead + 4, 7]|min }}">
   <div class="section-title">
     <h2>用量明细</h2>
-    <span>按阶段 / 用户拆分 · 估算值仅观察量级，计费以控制台账单为准</span>
+    <span>按阶段 / 用户拆分 · 评判与修订按 token 记账、朗读合成按字符记账、音色定制按次记账 · 估算值仅观察量级，计费以控制台账单为准</span>
   </div>
   <div class="grid-2">
     <div class="table-wrap narrow">
       <table class="sheet-table">
-        <thead><tr><th>阶段</th><th class="num">次数</th><th class="num">输入</th><th class="num">输出</th><th class="num">小计</th></tr></thead>
+        <thead><tr><th>阶段</th><th class="num">次数</th><th class="num">输入</th><th class="num">输出</th><th class="num">小计</th>{% if chars_total %}<th class="num">字符</th>{% endif %}{% if crea_total %}<th class="num">音色</th>{% endif %}</tr></thead>
         <tbody>
           {% for s in site_usage['by_stage'] %}
           <tr><td>{{ s['name'] }}{% if s['estimated'] %} <span class="tag tag-amber" style="font-size:10px;padding:1px 6px">估算</span>{% endif %}</td>
             <td class="num">{{ s['calls'] }}</td><td class="num">{{ s['prompt'] | n }}</td>
-            <td class="num">{{ s['completion'] | n }}</td><td class="num"><b>{{ s['total'] | n }}</b></td></tr>
+            <td class="num">{{ s['completion'] | n }}</td><td class="num"><b>{{ s['total'] | n }}</b></td>
+            {%- if chars_total %}<td class="num">{{ (s['characters'] or 0) | n }}</td>{% endif %}
+            {%- if crea_total %}<td class="num">{{ (s['creations'] or 0) or '—' }}</td>{% endif %}</tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     <div class="table-wrap narrow" style="--table-min:0px">
       <table class="sheet-table">
-        <thead><tr><th>用户</th><th class="num">次数</th><th class="num">token</th></tr></thead>
+        <thead><tr><th>用户</th><th class="num">次数</th><th class="num">token</th>{% if chars_total %}<th class="num">字符</th>{% endif %}{% if crea_total %}<th class="num">音色</th>{% endif %}</tr></thead>
         <tbody>
           {% for u in site_usage['by_user'] %}
           <tr><td>{{ u['name'] }}<div class="dim-en">消耗</div></td>
-            <td class="num">{{ u['calls'] }}</td><td class="num"><b>{{ u['total'] | n }}</b></td></tr>
+            <td class="num">{{ u['calls'] }}</td><td class="num"><b>{{ u['total'] | n }}</b></td>
+            {%- if chars_total %}<td class="num">{{ (u['characters'] or 0) | n }}</td>{% endif %}
+            {%- if crea_total %}<td class="num">{{ (u['creations'] or 0) or '—' }}</td>{% endif %}</tr>
           {% endfor %}
         </tbody>
       </table>
@@ -259,7 +267,9 @@
   </div>
   {% if site_usage['videos'] %}
   <p class="mono" style="font-size:11.5px;color:var(--ink-3);margin-top:14px">
-    最近消耗：{% for v in site_usage['videos'] %}#{{ v['id'] }} {{ v['title'][:12] }} {{ v['total'] | n }}
+    最近消耗：{% for v in site_usage['videos'] %}#{{ v['id'] }} {{ v['title'][:12] }} {{ v['total'] | n }} token
+    {%- if v.get('characters') %} + {{ v['characters'] | n }} 字符{% endif %}
+    {%- if v.get('creations') %} + {{ v['creations'] }} 次音色{% endif %}
     {{ '（估算）' if v['estimated'] else '' }}{{ '　·　' if not loop.last }}{% endfor %}
   </p>
   {% endif %}
