@@ -15,8 +15,9 @@
 用法：
     python tools/build_html.py --ip 203.0.113.10 --date 20260923   # IP 用你自己的
     python tools/build_html.py                 # 不注入，保留 <公网IP> 占位符
-输出（默认 dist/html，dist/ 已在 .gitignore 里）：
-    设计报告.html / 部署手册.html / 演讲评分系统-文档包-<日期>.zip
+输出（默认 docs/，与 Markdown 源同目录，随仓库一起进版本管理）：
+    docs/设计报告.html / docs/部署手册.html / docs/演讲评分系统-文档包-<日期>.zip
+换目录用 --out，例如 --out dist/html（dist/ 已在 .gitignore 里，适合临时预览）。
 退出码：审计发现问题时返回 1，方便挂进发布流程。
 """
 
@@ -36,9 +37,16 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import TextLexer, get_lexer_by_name
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR_DEFAULT = ROOT / "dist" / "html"
+OUT_DIR_DEFAULT = ROOT / "docs"
 
 DOCS = [
+    {
+        "src": Path("docs/项目建议书与方案报告.md"),
+        "out": "项目建议书与方案报告.html",
+        "title": "演讲评分系统 · 项目建议书及方案报告",
+        "short": "项目建议书",
+        "desc": "立项视角：背景 / 目标 / 方案 / 计划 / 预算与风险",
+    },
     {
         "src": Path("docs/设计报告.md"),
         "out": "设计报告.html",
@@ -57,8 +65,15 @@ DOCS = [
         "src": Path("docs/方案-版本指纹与压缩闸门.md"),
         "out": "方案-版本指纹与压缩闸门.html",
         "title": "演讲评分系统 · 版本指纹与压缩闸门方案",
-        "short": "方案",
+        "short": "方案·版本与闸门",
         "desc": "待决策：发布链路版本防呆 + 长视频压缩可行性闸门",
+    },
+    {
+        "src": Path("docs/方案-文字稿纠错与朗读合成.md"),
+        "out": "方案-文字稿纠错与朗读合成.html",
+        "title": "演讲评分系统 · 文字稿纠错与朗读合成方案",
+        "short": "方案·改稿与朗读",
+        "desc": "待决策：转写稿订正 + 主题化小改与确认门 + 在线 TTS 朗读",
     },
 ]
 
@@ -389,7 +404,7 @@ header.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.95);
 
 .layout{max-width:1360px;margin:0 auto;padding:0 24px 60px;display:grid;
   grid-template-columns:302px minmax(0,1fr);gap:30px;align-items:start}
-nav.side{position:sticky;top:50px;max-height:calc(100vh - 50px);overflow:auto;padding:18px 6px 40px}
+nav.side{position:sticky;top:50px;max-height:calc(100vh - 50px);overflow:auto;scroll-behavior:auto;padding:18px 6px 40px}
 nav.side .navtitle{font-family:var(--font-head);font-weight:700;font-size:11.5pt;margin:0 0 8px}
 nav.side .navswitch{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap}
 nav.side .search{margin:0 0 10px}
@@ -598,21 +613,38 @@ JS = r"""
 
   var tops = [];
   function measure() { tops = pairs.map(function (p) { return p.h.getBoundingClientRect().top + window.pageYOffset - 80; }); }
+  var navSide = document.querySelector('nav.side');
   var cur = -1;
+  function setActive(idx) {
+    cur = idx;
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (idx < 0 || !navSide) return;
+    var a = pairs[idx].a;
+    a.classList.add('active');
+    // 只在侧栏自己的滚动条上挪动，绝不碰文档滚动条：
+    // 用 scrollIntoView 会让 Chrome 连带滚动 viewport（nav 是 sticky 的，
+    // 它的可视位置随文档滚动变化，于是形成"跳过去又被拽回目录"的反馈）。
+    var nr = navSide.getBoundingClientRect(), ar = a.getBoundingClientRect();
+    if (ar.top < nr.top + 4) { navSide.scrollTop -= (nr.top + 4 - ar.top); }
+    else if (ar.bottom > nr.bottom - 4) { navSide.scrollTop += (ar.bottom - nr.bottom + 4); }
+  }
+  var suppressUntil = 0;
   function spy() {
     if (!tops.length) return;
+    if (Date.now() < suppressUntil) return;
     var y = window.pageYOffset, idx = -1;
     for (var i = 0; i < tops.length; i++) { if (tops[i] <= y) { idx = i; } else { break; } }
     if (idx === cur) return;
-    cur = idx;
-    links.forEach(function (a) { a.classList.remove('active'); });
-    if (idx >= 0) {
-      var a = pairs[idx].a;
-      a.classList.add('active');
-      var r = a.getBoundingClientRect();
-      if (r.top < 56 || r.bottom > window.innerHeight - 12) a.scrollIntoView({ block: 'nearest' });
-    }
+    setActive(idx);
   }
+  pairs.forEach(function (p) {
+    p.a.addEventListener('click', function () {
+      setActive(pairs.indexOf(p));
+      // html{scroll-behavior:smooth} 让锚点跳转变成一段动画，动画途中的 scroll
+      // 事件会把高亮改到中途经过的章节上，这里先按住 800ms 不跑 spy。
+      suppressUntil = Date.now() + 800;
+    });
+  });
   var queued = false;
   window.addEventListener('scroll', function () {
     if (queued) return;
@@ -728,15 +760,22 @@ def audit(pages: list[tuple[dict, str, dict]], subs: dict) -> list[str]:
             ref = m.group(1).rstrip(".")
             if ref in nums:
                 continue
-            # 允许显式标注了对方文档名的跨文档引用（如"部署手册 §7.2"）
+            # 允许显式标注了对方文档名的跨文档引用（如"部署手册 §7.2""方案·改稿与朗读 §3.4"）
             bol = page.rfind("\n", 0, m.start()) + 1
             pre = page[bol : m.start()]
-            other = None
-            if "设计报告" in pre:
-                other = "设计报告"
-            elif "部署手册" in pre or "手册" in pre:
-                other = "部署手册"
-            if other and other != doc["short"] and ref in nums_by_doc.get(other, set()):
+            cross = False
+            for cand, cand_nums in nums_by_doc.items():
+                if cand == doc["short"] or ref not in cand_nums:
+                    continue
+                tags = {cand, cand.split("·")[0]}
+                if cand.startswith("方案"):
+                    tags.add("方案")
+                if cand.startswith("部署手册"):
+                    tags.add("手册")
+                if any(t and t in pre for t in tags):
+                    cross = True
+                    break
+            if cross:
                 continue
             bad.append(f"{name}: §{ref} 指向不存在的章节号")
         for opener, closer in (("<div", "</div>"), ("<figure", "</figure>"), ("<pre", "</pre>"), ("<table", "</table>")):
@@ -788,7 +827,12 @@ def main(argv: list[str] | None = None) -> int:
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
             for doc, _, _ in pages:
                 z.write(out_dir / doc["out"], doc["out"])
+        stale = sorted(p.name for p in out_dir.glob("演讲评分系统-文档包-*.zip") if p.name != zip_name)
+        for name in stale:
+            (out_dir / name).unlink()
         print(f"--- {zip_name} · {zp.stat().st_size / 1024:.1f} KB")
+        if stale:
+            print("    清理旧打包件：" + "、".join(stale))
 
     print("[out]", out_dir)
     print("[audit]", "全部通过" if not problems else f"{len(problems)} 项待修")
