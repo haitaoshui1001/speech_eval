@@ -14,13 +14,16 @@
         api_key.txt    千问密钥，进包等于把密钥上传到公网服务器
         .env           本地开发配置（含 dev SECRET_KEY / admin123）
         data/          本地用户数据、视频、speech.db
+        docs/*.html    文档的本地渲染件 + 文档包 zip（服务器上有 .md 即可，不必带 0.7 MB 渲染件）
         __pycache__/ *.pyc *.log logs_*.txt 以及临时脚本
 
-    另外做两件容易翻车的事：
+    另外做三件容易翻车的事：
         1) 把 deploy/ 下的 .sh / .service / .conf / env.production 换行符归一为 LF。
            Windows 上写的 bash 脚本带 CRLF，在 Linux 上会直接报
            "/usr/bin/env: bash\r: No such file or directory"。
         2) 打完包再解压一次做回环校验，确认中文文件名（评价标准.txt）没被编错码。
+        3) 写 BUILD_INFO.json 版本指纹（git sha/分支/dirty/打包时刻），
+           服务器上的 update.sh 与 /health 靠它回答「线上跑的到底是哪一版」。
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File deploy\package.ps1
@@ -36,6 +39,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Invoke-RepoGit {
+    param([string[]]$GitArgs)
+    # git 在无仓库/网络异常时会写 stderr；PS 5.1 里 $ErrorActionPreference='Stop' 配上
+    # 2>$null 可能把 stderr 变成终止错误，所以这里临时降为 SilentlyContinue 再取退出码。
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $out = & git -C $repoRoot @GitArgs 2>$null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($code -ne 0) { return $null }
+    return (($out | Out-String).Trim())
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $repoRoot 'dist' }
@@ -73,6 +89,17 @@ try {
         Where-Object { $_.Extension -in @('.pyc', '.pyo', '.log', '.tmp') -or $_.Name -like 'logs_*.txt' } |
         Remove-Item -Force
 
+    # docs/ 下的 HTML 与文档包 zip 是本地产物（服务器上有 .md 就够读，不必带渲染件），不进包。
+    # 只清 docs 顶层，app/templates/*.html 是运行时模板，不能碰。
+    $docsStage = Join-Path $stage 'docs'
+    if (Test-Path $docsStage) {
+        Get-ChildItem $docsStage -File | Where-Object { $_.Extension -in @('.html', '.zip') } |
+            ForEach-Object {
+                Write-Host "[排除] docs/$($_.Name)" -ForegroundColor DarkGray
+                Remove-Item $_.FullName -Force
+            }
+    }
+
     # -------------------------------------------------- deploy/ 模板换行符归一为 LF
     $deployStage = Join-Path $stage 'deploy'
     $noBom = New-Object System.Text.UTF8Encoding($false)
@@ -95,6 +122,35 @@ try {
     }
     if (Test-Path (Join-Path $stage 'data')) { throw '包里含 data/ 目录，服务器上会盖掉真实用户数据。' }
 
+    # -------------------------------------------------- 版本指纹 BUILD_INFO.json
+    # 服务器不是 git 工作树、/health 此前没有任何代码标识，「线上跑的哪一版」只能靠
+    # 手填的包名日期。打包即写指纹：update.sh 与 /health 拿它做升级前后的闭环比对。
+    $gitSha = 'unknown'; $gitShort = 'unknown'; $gitBranch = 'unknown'; $dirty = $false
+    if (Get-Command git.exe -ErrorAction SilentlyContinue) {
+        $head = Invoke-RepoGit @('rev-parse', 'HEAD')
+        if ($head) {
+            $gitSha = $head
+            $gitShort = if ($head.Length -ge 9) { $head.Substring(0, 9) } else { $head }
+            $branch = Invoke-RepoGit @('rev-parse', '--abbrev-ref', 'HEAD')
+            if ($branch) { $gitBranch = $branch }
+            $porcelain = Invoke-RepoGit @('status', '--porcelain')
+            if ($porcelain) { $dirty = $true }
+        }
+    }
+    $buildInfo = [ordered]@{
+        git_sha    = $gitSha
+        git_short  = $gitShort
+        git_branch = $gitBranch
+        dirty      = [bool]$dirty
+        built_at   = (Get-Date -Format 'yyyy-MM-ddTHH:mm:sszzz')
+        package    = $leaf
+        source     = 'deploy/package.ps1'
+    }
+    [System.IO.File]::WriteAllText((Join-Path $stage 'BUILD_INFO.json'),
+        (ConvertTo-Json -InputObject $buildInfo -Compress), $noBom)
+    Write-Host "[指纹] $gitShort @ $gitBranch dirty=$dirty -> BUILD_INFO.json"
+    if ($dirty) { Write-Host '[指纹] 工作区有未提交改动：本包内容不等于该 SHA 的干净版本，正式发布请先提交再重打。' -ForegroundColor Yellow }
+
     # -------------------------------------------------- 生成 tar.gz
     $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
     if (-not $tar) { throw '找不到 tar.exe（Win10 1803+ 自带）。也可以手动压成 zip 后改用 unzip 部署。' }
@@ -113,7 +169,7 @@ try {
     & $tar.Source -xzf $archive -C $verify
     if ($LASTEXITCODE -ne 0) { throw 'tar 解压校验失败。' }
 
-    foreach ($need in @('app/main.py', 'app/static/style.css', 'deploy/install.sh', 'requirements.txt')) {
+    foreach ($need in @('app/main.py', 'app/static/style.css', 'deploy/install.sh', 'requirements.txt', 'BUILD_INFO.json')) {
         if (-not (Test-Path (Join-Path $verify (Join-Path $leaf $need)))) { throw "包内缺少 $need" }
     }
     $rubricInPkg = Get-ChildItem $verify -Recurse -File | Where-Object { $_.Name -eq '评价标准.txt' }
@@ -132,6 +188,7 @@ try {
     Write-Host "  文件    : $archive"
     Write-Host "  大小    : $size MB，共 $count 个文件"
     Write-Host "  顶层目录: $leaf"
+    Write-Host "  版本指纹: $gitShort @ $gitBranch$(if ($dirty) { ' (dirty: 含未提交改动)' })"
     Write-Host ''
     Write-Host '下一步（上传 + 安装）：' -ForegroundColor Yellow
     Write-Host "  scp `"$archive`" root@<公网IP>:/root/"

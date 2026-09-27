@@ -56,6 +56,15 @@ if [ "$DO_BACKUP" = "1" ] && [ -x "$APP_DIR/deploy/backup.sh" ]; then
     bash "$APP_DIR/deploy/backup.sh" || warn "备份失败，继续升级（可用 --no-backup 明确跳过）"
 fi
 
+# 版本指纹：BUILD_INFO.json 由 package.ps1 打包时写成单行 JSON。
+# 服务器不是 git 工作树，之前"线上跑的哪一版"只能信包名里的日期戳；
+# 现在 rsync 前取旧指纹、成功后取 /health 的 version，升级可以闭环比对。
+json_field() {
+    [ -f "$1" ] && grep -o "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$1" \
+        | head -n 1 | sed 's/.*:[[:space:]]*"//; s/"$//' || true
+}
+OLD_SHA="$(json_field "$APP_DIR/BUILD_INFO.json" git_sha)"
+
 log "同步代码 -> $APP_DIR"
 rsync -a --delete \
     --exclude '/data/' --exclude '/.venv/' --exclude '/.env' --exclude '/api_key.txt' \
@@ -63,6 +72,21 @@ rsync -a --delete \
     --exclude '*.pyc' --exclude '*.log' --exclude 'logs_*.txt' \
     --exclude '/backups/' \
     "$NEW_DIR/" "$APP_DIR/"
+
+NEW_SHA="$(json_field "$APP_DIR/BUILD_INFO.json" git_sha)"
+NEW_SHORT="$(json_field "$APP_DIR/BUILD_INFO.json" git_short)"
+[ -n "$NEW_SHORT" ] || NEW_SHORT="$NEW_SHA"
+if [ -z "$NEW_SHA" ]; then
+    warn "新包没有 BUILD_INFO.json —— 多半是旧版 package.ps1 打的，升级后线上将是未知版本。"
+elif [ "$NEW_SHA" = "unknown" ]; then
+    warn "新包指纹是 unknown（打包机上取不到 git），本次升级无法做版本闭环。"
+elif [ -z "$OLD_SHA" ]; then
+    log "上一次部署没有指纹可比（旧包），新包代码：${NEW_SHORT:0:9}"
+elif [ "$OLD_SHA" = "$NEW_SHA" ]; then
+    warn "代码指纹没变：${NEW_SHORT:0:9} —— 传上来的包和服务器现有代码是同一 git 提交，请确认这真是你要发布的新包。"
+else
+    log "代码指纹：${OLD_SHA:0:9} -> ${NEW_SHORT:0:9}"
+fi
 
 log "补装/更新 Python 依赖"
 PIP_HOST="mirrors.aliyun.com/pypi/simple"
@@ -118,8 +142,19 @@ log "重启服务"
 systemctl restart "$SERVICE"
 sleep 3
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if curl -fsS --max-time 5 "http://127.0.0.1:${PORT:-8000}/health" >/dev/null 2>&1; then
+    HEALTH_BODY="$(curl -fsS --max-time 5 "http://127.0.0.1:${PORT:-8000}/health" 2>/dev/null || true)"
+    if [ -n "$HEALTH_BODY" ]; then
         log "升级完成，/health 正常。"
+        RUN_VER="$(printf '%s' "$HEALTH_BODY" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+        if [ -z "$RUN_VER" ]; then
+            warn "/health 里没有 version 字段：要么还在跑旧代码，要么这一版还没带指纹能力，请手动确认。"
+        else
+            log "运行版本：$RUN_VER"
+            if [ -n "$NEW_SHA" ] && [ "$NEW_SHA" != "unknown" ] \
+                && ! printf '%s' "$RUN_VER" | grep -qF "${NEW_SHA:0:9}"; then
+                warn "运行版本与新包指纹 ${NEW_SHA:0:9} 对不上——服务可能没重启到新代码：journalctl -u $SERVICE -n 50 --no-pager"
+            fi
+        fi
         exit 0
     fi
     sleep 2

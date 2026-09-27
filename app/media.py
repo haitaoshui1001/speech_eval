@@ -81,6 +81,50 @@ def extract_audio(video: Path, out_dir: Path, max_seconds: int = 0) -> Path | No
     return target
 
 
+def concat_audio(paths: list[Path], dest: Path, *, gap_ms: int = 250) -> Path:
+    """拼接朗读分块：块间垫 gap_ms 毫秒静音，统一重编码 24kHz 单声道 mp3 48kbps。
+
+    各块可能来自不同模型/不同格式，逐路先 aresample+aformat 归一，再进 concat，
+    避免「采样率不一致」这类隐蔽失败。
+    """
+    files = [Path(p) for p in paths if p and Path(p).exists()]
+    if not files:
+        raise RuntimeError("没有可拼接的音频分块")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if len(files) == 1:
+        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(files[0]),
+               "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "48k", str(dest)]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if res.returncode != 0 or not dest.exists() or dest.stat().st_size < 1024:
+            raise RuntimeError(f"音频重编码失败: {res.stderr[-400:]}")
+        return dest
+    gap_s = max(0, int(gap_ms)) / 1000.0
+    cmd = [ffmpeg_exe(), "-y", "-v", "error"]
+    refs: list[str] = []
+    idx = 0
+    for i, f in enumerate(files):
+        cmd += ["-i", str(f)]
+        refs.append(f"[{idx}:a]")
+        idx += 1
+        if gap_s > 0 and i < len(files) - 1:
+            cmd += ["-f", "lavfi", "-t", f"{gap_s:.3f}", "-i", "anullsrc=r=24000:cl=mono"]
+            refs.append(f"[{idx}:a]")
+            idx += 1
+    parts: list[str] = []
+    labels: list[str] = []
+    for k, ref in enumerate(refs):
+        parts.append(f"{ref}aresample=24000,aformat=sample_fmts=s16:channel_layouts=mono[c{k}]")
+        labels.append(f"[c{k}]")
+    parts.append("".join(labels) + f"concat=n={len(refs)}:v=0:a=1[out]")
+    cmd += ["-filter_complex", ";".join(parts), "-map", "[out]",
+            "-c:a", "libmp3lame", "-b:a", "48k", str(dest)]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if res.returncode != 0 or not dest.exists() or dest.stat().st_size < 1024:
+        raise RuntimeError(f"音频拼接失败: {res.stderr[-400:]}")
+    return dest
+
+
 @dataclass
 class FrameSet:
     """关键帧及其**真实采样时刻**（秒）。stamps 与 paths 一一对应。"""

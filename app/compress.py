@@ -5,10 +5,16 @@
 
 画质优先的顺序是「先保分辨率、码率实在不够才降分辨率」：评审的画面通道只取 640px 宽的
 关键帧，压缩对评分输入没有影响，只影响网页回放的观感，所以档位只往下掉到 480p 为止。
+
+动手编码之前先过一道可行性闸门（feasibility）：目标体积除以时长摊出的码率如果连
+地板都够不到，或者按经验折算单遍就要撞上超时上限，那这次压缩注定失败——与其让用户
+在队列里等几十分钟再收到一句含糊的报错，不如排队阶段就用中文说清「装不下、至少要
+多大、怎么出路」。COMPRESS_FEASIBILITY=0 可整体退回旧行为。
 """
 from __future__ import annotations
 
 import glob
+import math
 import os
 import subprocess
 import time
@@ -31,6 +37,21 @@ PRESET = "veryfast"      # 后台队列跑，两核服务器上再慢一档会�
 _KEYFRAMES = "expr:gte(t,n_forced*2)"   # 每 2 秒一个关键帧，保证网页回放拖得不卡
 _MIN_VIDEO_KBPS = 100
 _RETRY_SLACK_KBPS = 300  # 回调幅度小于这个值就别再跑第二遍了，省时间
+_MB = 1024 * 1024
+# 每 1 分钟素材在 2 vCPU 服务器上单遍编码的折算秒数。来源：部署手册记录的实测
+# 「每分钟 1080p 素材要 1~2 分钟（veryfast）」，取中偏保守的 80。低分辨率素材
+# 实际更快，闸门对它们可能偏严——出路写在提示语里（调大 COMPRESS_TIMEOUT），
+# 也可用 COMPRESS_FEASIBILITY=0 整体关闭。
+ESTIMATED_SECONDS_PER_SOURCE_MINUTE = 80
+_MAX_TIMEOUT_ENV = 21600   # 与 config 里 COMPRESS_TIMEOUT 的 high 一致，提示语只推荐调得动的值
+
+
+@dataclass(frozen=True)
+class Feasibility:
+    """编码前的体检结果。error 非空 = 注定失败必须拦；quality_note 非空 = 放行但留痕。"""
+    min_target_bytes: int
+    error: str = ""
+    quality_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -57,6 +78,7 @@ class Result:
     orig_path: Path | None = None
     orig_width: int = 0
     orig_height: int = 0
+    gate_note: str = ""               # 闸门放行但需要留痕的画质告警，随 note 进报告
 
     @property
     def renamed(self) -> bool:
@@ -82,10 +104,13 @@ class Result:
             extra = f"，分辨率 {self.orig_width}x{self.orig_height} → {self.plan.width}x{self.plan.height}"
         if self.renamed:
             extra += "，容器统一转封为 MP4"
-        return (f"原始文件 {self.orig_size / mb:.1f} MB 超过目标 "
+        note = (f"原始文件 {self.orig_size / mb:.1f} MB 超过目标 "
                 f"{self.plan.target_bytes / mb:.0f} MB，已两遍编码压到 {self.size / mb:.1f} MB"
                 f"（视频 {self.plan.video_kbps}kbps / 音频 {self.plan.audio_kbps}kbps{extra}），"
                 f"耗时 {cost}。评分用的关键帧只有 {settings.frame_width}px 宽，压缩不影响评分依据。")
+        if self.gate_note:
+            note += f"注：{self.gate_note}"
+        return note
 
 
 def target_bytes() -> int:
@@ -119,6 +144,61 @@ def cap_short_edge(width: int, height: int, cap: int) -> tuple[int, int]:
     return w, h
 
 
+def _minutes_text(duration: float) -> str:
+    m = duration / 60
+    return f"{m:.1f}".rstrip("0").rstrip(".")
+
+
+def feasibility(info: media.MediaInfo, target: int,
+                timeout: int | None = None) -> Feasibility:
+    """编码前的三道算术题，全部只依赖 probe 结果与配置，方便单测：
+
+    1. 装不下：目标体积比「全程按地板码率（视频 100k + 音轨 96k）编出来还要小」→ 拦；
+    2. 必超时：按 80 秒/分钟折算单遍耗时超过 COMPRESS_TIMEOUT → 拦；
+    3. 画质破线：掉到 480p 每像素比特数仍低于 MIN_BPP → 放行，但把告警带进报告。
+    """
+    if target <= 0 or info.duration <= 0:
+        return Feasibility(min_target_bytes=0)
+    duration = info.duration
+    audio_kbps = AUDIO_KBPS if info.has_audio else 0
+    # 硬地板：pick_plan 会把视频码率夹到 _MIN_VIDEO_KBPS 以上，所以目标只要还大于
+    # 「地板码率 x 时长」就压得动（HEADROOM 只是留给封装开销的余量，不是能不能压的分界）。
+    # 恰好卡在地板附近的情况由第 3 题（bpp）负责留痕，而不是拦。
+    min_bytes = int(duration * (_MIN_VIDEO_KBPS + audio_kbps) * 1000 / 8)
+    mins = _minutes_text(duration)
+    if target < min_bytes:
+        need = max(1, int(math.ceil(min_bytes / _MB)))
+        return Feasibility(min_target_bytes=min_bytes,
+                           error=f"{target / _MB:.0f} MB 的目标装不下 {mins} 分钟的视频。"
+                                 f"按最低可用码率（视频 {_MIN_VIDEO_KBPS}kbps"
+                                 f"{' + 音频 ' + str(audio_kbps) + 'kbps' if audio_kbps else '，无声轨'}）计算，"
+                                 f"这个时长至少需要 {need} MB。"
+                                 f"建议：剪辑分段分别上传，或把「自动压缩目标」调到 {need} MB 以上。")
+    if timeout is None:
+        timeout = max(60, int(settings.compress_timeout))
+    est = duration / 60 * ESTIMATED_SECONDS_PER_SOURCE_MINUTE
+    if est > timeout:
+        need_timeout = int(math.ceil(est * 1.25 / 100) * 100)
+        way_out = (f"建议把「压缩超时」调到 {need_timeout} 秒，或改传更短的素材。"
+                   if need_timeout <= _MAX_TIMEOUT_ENV else
+                   "该时长已超出可调整的超时上限（21600 秒），建议剪辑分段上传。")
+        return Feasibility(min_target_bytes=min_bytes,
+                           error=f"这段 {mins} 分钟的视频按经验折算单遍编码约需 {est:.0f} 秒，"
+                                 f"超过当前 {timeout} 秒的压缩超时上限，必然被中断"
+                                 f"（两遍编码每遍都要跑满全程）。{way_out}")
+    note = ""
+    fps = info.fps if 0 < info.fps <= 120 else 25.0
+    if info.width and info.height:
+        w, h = cap_short_edge(info.width, info.height, LADDER[-1])
+        video_kbps = max(_MIN_VIDEO_KBPS, target * HEADROOM * 8 / duration / 1000 - audio_kbps)
+        bpp = video_kbps * 1000 / (w * h * fps)
+        if bpp < MIN_BPP:
+            note = (f"时长 {mins} 分钟使 480p 画面的每像素比特数低于 {MIN_BPP}"
+                    f"（实际 {bpp:.3f}），回放时文字边缘会有可见色块。"
+                    f"评分依据是 {settings.frame_width}px 关键帧，不受影响。")
+    return Feasibility(min_target_bytes=min_bytes, quality_note=note)
+
+
 def pick_plan(info: media.MediaInfo, target: int) -> Plan:
     """由目标体积反推码率，再按「每像素比特数」决定要不要降分辨率。
 
@@ -127,6 +207,10 @@ def pick_plan(info: media.MediaInfo, target: int) -> Plan:
     """
     if info.duration <= 0:
         raise RuntimeError("时长探测失败，无法计算压缩码率，请检查文件是否能正常播放")
+    if settings.compress_feasibility:
+        gate = feasibility(info, target)
+        if gate.error:
+            raise RuntimeError(gate.error)
     fps = info.fps if 0 < info.fps <= 120 else 25.0
     budget_bits = target * HEADROOM * 8 / info.duration
     audio_kbps = AUDIO_KBPS if info.has_audio else 0
@@ -238,6 +322,8 @@ def compress(src: Path, info: media.MediaInfo,
     if target <= 0 or orig_size <= target:
         return None
     plan = pick_plan(info, target)
+    # pick_plan 已负责拦「注定失败」；这里再取一次放行留痕的画质告警（纯算术，不重复编码）。
+    gate_note = feasibility(info, target).quality_note if settings.compress_feasibility else ""
     tmp = src.with_name(f"{src.stem}.compressing.mp4")
     passlog = str(tmp.with_suffix("")) + ".pass"
     started = time.time()
@@ -261,8 +347,14 @@ def compress(src: Path, info: media.MediaInfo,
             # 不划算就不换：原片码率本来就低于目标时偶尔会倒挂，保留原件比换个更大的文件强。
             return None
         if size > target:
+            hint = "（原文件已保留，可直接重跑或调大目标）"
+            if plan.video_kbps <= _MIN_VIDEO_KBPS:
+                need = math.ceil(feasibility(info, target).min_target_bytes / _MB)
+                if need > 0:
+                    hint = (f"（原文件已保留；码率已触底 {_MIN_VIDEO_KBPS}kbps，"
+                            f"该时长至少需要 {need} MB 才压得动）")
             raise RuntimeError(f"两遍编码后仍有 {size / 1048576:.1f} MB，未能压到目标 "
-                               f"{target / 1048576:.0f} MB（原文件已保留，可直接重跑或调大目标）")
+                               f"{target / 1048576:.0f} MB{hint}")
         final = _final_path(src)
         os.replace(tmp, final)
         if final != src:
@@ -270,7 +362,8 @@ def compress(src: Path, info: media.MediaInfo,
         return Result(orig_size=orig_size, size=size, plan=plan,
                       seconds=time.time() - started, attempts=attempts,
                       path=final, orig_path=src,
-                      orig_width=info.width, orig_height=info.height)
+                      orig_width=info.width, orig_height=info.height,
+                      gate_note=gate_note)
     finally:
         if tmp.exists():
             try:
