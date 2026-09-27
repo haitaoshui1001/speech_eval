@@ -210,7 +210,7 @@ main {
   margin-left: auto;
 }
 
-.lede { font-size: 17.5px; color: var(--ink-2); max-width: 80ch; }
+.lede { font-size: 17.5px; color: var(--ink-2); max-width: 58em; }
 
 .dim-text { color: var(--ink-3); }
 
@@ -551,7 +551,7 @@ details.ev .ev-in { padding-top: 10px; padding-bottom: 10px; }
 .sugg .row.dim-hot .pri { background: var(--seal); }
 
 /* ------------------------------------------------------------------ 摘要/正文 */
-.prose { font-size: 16.5px; max-width: 96ch; }
+.prose { font-size: 16.5px; max-width: 64em; }
 .prose p { margin: 0 0 1.05em; text-indent: 2em; }
 .prose p:first-child { text-indent: 0; }
 .prose p:first-child::first-letter {
