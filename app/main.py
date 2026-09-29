@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import (accounts, buildinfo, config, db, face as face_mod, pipeline,
-               prompts, qwen, revise, tts, voice as voice_mod)
+               prompts, qwen, revise, topicmatch, tts, voice as voice_mod)
 from .analyze import (QA_ANSWER_FALLBACK, QA_QUESTION_COUNT, build_questions,
                       channel_weights, fallback_questions, review_answers)
 from .config import settings
@@ -58,6 +58,26 @@ app = FastAPI(title="演讲视频评价系统", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 (BASE / "static").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+
+
+class ArrivalClock:
+    """纯 ASGI 中间件：给每个 HTTP 请求盖一个"到达时刻"，只写一个 scope 键，不打日志不改响应。
+
+    为什么非得往前挪一层：FastAPI 在 upload() 的函数体开始执行**之前**就把整个 multipart 正文
+    读完了（大文件先由框架落进临时文件）。在路由里从第一行起表，只能量到"转存 + 入库 + 入队"，
+    公网上传真正吃掉的十几秒会被完整漏掉，日志反而把人引去查数据库。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            scope["t_arrive"] = time.perf_counter()
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ArrivalClock)
 
 
 # ------------------------------------------------------------- 并发与启动
@@ -103,6 +123,21 @@ def human_size(n: int | None) -> str:
     return f"{n:.1f} GB"
 
 
+def upload_timing(username: str, size: int, recv_s: float, save_s: float = 0.0,
+                  db_s: float = 0.0, enq_s: float = 0.0, where: str = "") -> None:
+    """把一次上传拆成四段打在控制台：慢在哪一段不必猜。
+
+    接收段 = 浏览器 → nginx → uvicorn 的传输（nginx 关了 request buffering，边收边转）再叠上框架
+    把正文先写进临时文件的时间；后三段才是本项目自己的开销。合计只是服务端这一段，浏览器随后还要
+    再走一次"303 → 加载进度页"，同样要过这条链路。
+    """
+    rate = f"{size / 1048576 / recv_s:5.1f} MB/s" if recv_s > 0.05 else "—"
+    total = recv_s + save_s + db_s + enq_s
+    print(f"[上传] {username} {human_size(size)}｜接收 {recv_s:.2f}s（{rate}）"
+          f" 转存 {save_s:.2f}s 入库 {db_s:.2f}s 入队 {enq_s:.2f}s"
+          f"｜服务端合计 {total:.2f}s → {where}", flush=True)
+
+
 def fmt_date(iso: str | None) -> str:
     return (iso or "")[:16].replace("T", " ")
 
@@ -122,14 +157,46 @@ def thousands(value) -> str:
         return "0"
 
 
+def drop_label(text: str, prefix: str = "") -> str:
+    """剥掉内容开头重复的字段名。
+
+    模型常把提示词里给它的标签当成答案回显（"下一步只练一件事：为 In my perspective…"），
+    而模板本来就把标签印在左边，于是同一句话出现两次。渲染前剥一次，历史报告一并修好，
+    不需要重新分析；剥完只剩标签本身的（说明模型没给内容）就原样保留，免得框里空着。
+    """
+    s = str(text if text is not None else "").strip()
+    p = str(prefix if prefix is not None else "").strip()
+    if not s or not p:
+        return s
+    while s.lstrip().startswith(p):
+        rest = s.lstrip()[len(p):].lstrip("：:，,、;；.。 \u3000-—－")
+        if not rest:
+            return s
+        s = rest
+    return s
+
+
 templates.env.filters["ts"] = fmt_ts
 templates.env.filters["size"] = human_size
 templates.env.filters["dt"] = fmt_date
 templates.env.filters["g"] = as_num
 templates.env.filters["n"] = thousands
+templates.env.filters["droplabel"] = drop_label
+
+
+def static_ver() -> str:
+    """style.css 的版本指纹（mtime+size）。浏览器缓存样式没有内容校验，
+    改过 CSS 后用户仍会拿到旧版（历史上真实踩过：宽度修复"不生效"），
+    所以链接必须带 ?v=，文件一变指纹就变、缓存自然失效。"""
+    try:
+        st = (BASE / "static" / "style.css").stat()
+        return f"{int(st.st_mtime):x}-{st.st_size:x}"
+    except OSError:
+        return "0"
 
 
 def render(request: Request, name: str, **ctx):
+    ctx.setdefault("static_ver", static_ver())
     ctx.setdefault("rubric", DEFAULT_RUBRIC)
     ctx.setdefault("real_mode", settings.real_mode)
     ctx.setdefault("real_mode_model", settings.chat_model)
@@ -262,6 +329,9 @@ def dashboard(request: Request, msg: str = ""):
 async def upload(request: Request, title: str = Form(""), topic: str = Form(""),
                  requirements: str = Form(""), auto: str = Form(""),
                  video: UploadFile | None = File(None)):
+    # 走到这一行时正文其实已经收完了，接收耗时只能从中间件盖的到达时刻倒推
+    recv_s = max(0.0, time.perf_counter() - request.scope.get("t_arrive", time.perf_counter()))
+    declared = int(request.headers.get("content-length") or 0)
     user = session_user(request)
     if user is None:
         return login_redirect(request)
@@ -269,6 +339,7 @@ async def upload(request: Request, title: str = Form(""), topic: str = Form(""),
     if video is None or video.filename == "":
         return RedirectResponse("/dashboard?msg=请先选择视频文件", status_code=303)
     if suffix not in ALLOWED_SUFFIXES:
+        upload_timing(user["username"], declared, recv_s, where=f"拒绝：不支持的类型 {suffix}")
         return RedirectResponse(
             "/dashboard?msg=" + f"不支持的文件类型 {suffix}，请上传 mp4/mov/webm/mkv 等视频", status_code=303)
     quota = db.upload_quota(user["id"])
@@ -276,6 +347,7 @@ async def upload(request: Request, title: str = Form(""), topic: str = Form(""),
         # 闸门必须在落盘之前：先写几百 MB 再拒绝，等于让额度用完的人照样打满磁盘
         why = ("该账号已被管理员停止上传" if quota["limit"] == 0
                else f"上传次数已用完（{quota['used']}/{quota['limit']}）")
+        upload_timing(user["username"], declared, recv_s, where="拒绝：" + why)
         return RedirectResponse("/dashboard?msg=" + why + "，请联系管理员重置", status_code=303)
 
     settings.video_dir.mkdir(parents=True, exist_ok=True)
@@ -283,6 +355,7 @@ async def upload(request: Request, title: str = Form(""), topic: str = Form(""),
     dest = settings.video_dir / f"{user['id']}-{int(time.time())}-{safe}"
     limit = settings.max_video_bytes
     size = 0
+    t_save0 = time.perf_counter()
     try:
         with dest.open("wb") as fh:
             while True:
@@ -295,17 +368,28 @@ async def upload(request: Request, title: str = Form(""), topic: str = Form(""),
                 fh.write(chunk)
     except ValueError as exc:
         dest.unlink(missing_ok=True)
+        save_s = time.perf_counter() - t_save0
+        upload_timing(user["username"], size, recv_s, save_s, where="拒绝：超过体积上限")
         return RedirectResponse("/dashboard?msg=" + str(exc), status_code=303)
     except Exception as exc:  # noqa: BLE001 - 落盘失败不应留半成品
         dest.unlink(missing_ok=True)
+        save_s = time.perf_counter() - t_save0
+        upload_timing(user["username"], size, recv_s, save_s, where=f"失败：落盘异常 {type(exc).__name__}")
         return RedirectResponse("/dashboard?msg=上传失败：" + type(exc).__name__, status_code=303)
+    save_s = time.perf_counter() - t_save0
 
+    t_db0 = time.perf_counter()
     vid = db.create_video(user["id"], title.strip() or Path(video.filename).stem,
                           Path(video.filename).name, str(dest), size,
                           topic=topic.strip(), requirements=requirements.strip())
+    db_s = time.perf_counter() - t_db0
     if auto == "1":
+        t_enq0 = time.perf_counter()
         pipeline.enqueue(vid)
+        enq_s = time.perf_counter() - t_enq0
+        upload_timing(user["username"], size, recv_s, save_s, db_s, enq_s, where=f"/videos/{vid}（自动分析）")
         return RedirectResponse(f"/videos/{vid}", status_code=303)
+    upload_timing(user["username"], size, recv_s, save_s, db_s, where="/dashboard（手动分析）")
     return RedirectResponse("/dashboard?msg=上传成功，点击「开始分析」即可评分", status_code=303)
 
 
@@ -699,11 +783,10 @@ def video_page(request: Request, video_id: int, msg: str = "", smsg: str = "", t
     film = build_film(frames, report.get("stamps") or [], face.get("frames") or [])
     history = db.history_for_user(video["user_id"])
     rank = next((i + 1 for i, h in enumerate(history) if h["id"] == video_id), len(history))
-    prev = None
-    if rank > 1:
-        prev = db.get_evaluation(history[rank - 2]["id"])
-        prev_dims = db.dims_for_video(history[rank - 2]["id"]) if prev else {}
-        prev = {"video": history[rank - 2], "dims": prev_dims}
+    # 对照区只跟本次主题的更早几次比（次数 1~5，不含本次）；本主题没有历史则整块不显示
+    vs_topics, vs_sel, vs_cols, vs_n, vs_max = _vs_block(
+        history, video_id, request.query_params.get("vs_n") or "")
+    prev = vs_cols[-1] if vs_cols else None
     segments = json.loads(video["segments"] or "[]")
     qa = db.get_questions(video_id)
     script_items = revise.items_from_json(video["script_items"])
@@ -719,6 +802,7 @@ def video_page(request: Request, video_id: int, msg: str = "", smsg: str = "", t
               "recommended": {k: rec for k, _, _, rec in revise.KINDS}}
     return render(request, "report.html", nav="dashboard", video=video, report=report, dims=dims,
                   frames=frames, film=film, face=face, ev=ev, prev=prev, rank=rank,
+                  vs_topics=vs_topics, vs_sel=vs_sel, vs_cols=vs_cols, vs_n=vs_n, vs_max=vs_max,
                   total_runs=len(history),
                   segments=segments, is_owner=user["id"] == video["user_id"],
                   qa=qa, qa_answered=any(q["status"] == "answered" for q in qa), msg=msg,
@@ -791,8 +875,58 @@ def _stream(path: Path, request: Request, media_type: str) -> StreamingResponse:
 
 
 # ------------------------------------------------------------------ 历次对比
+def _rows_for_match(history) -> list[dict]:
+    return [{"id": int(h["id"]), "topic": str(h["topic"] or ""),
+             "title": str(h["title"] or "")} for h in history]
+
+
+def _mode_ids(history, mode: str) -> list[int]:
+    """按 mode 选对比对象：same:<id>=与它同主题的全部，cross:<id>=每个主题簇各取最新一次。"""
+    m = re.fullmatch(r"(same|cross):(\d+)", mode or "")
+    if not m or not history:
+        return []
+    kind, anchor = m.group(1), int(m.group(2))
+    thr = settings.topic_match_threshold
+    rows = _rows_for_match(history)
+    if kind == "same":
+        ids = topicmatch.same_topic_ids(rows, anchor, thr)
+        return ids[-6:]
+    picks = [c["members"][-1]["id"] for c in topicmatch.cluster(rows, thr)]
+    anchor_newest = topicmatch.cluster([r for r in rows if r["id"] <= anchor], thr)
+    anchor_pick = anchor_newest[-1]["members"][-1]["id"] if anchor_newest else anchor
+    if all(p != anchor_pick for p in picks):
+        picks.append(anchor_pick)
+    others = sorted(p for p in picks if p != anchor_pick)
+    return (others + [anchor_pick])[:6] if anchor_pick in picks else picks[:6]
+
+
+def _vs_block(history, video_id: int,
+              n_raw: str) -> tuple[list[dict], dict | None, list[dict], int, int]:
+    """报告页对照区：只跟「本次这个主题」的更早几次比，主题下拉因此只有本次主题一项。
+
+    返回 (topics, sel, cols, n, max_n)。本次主题在更早没有任何同主题分析时返回全空——
+    对照区、总分卡「较上次」与「与上次对比」按钮一起不显示，绝不回落到别的主题凑对比。
+    """
+    thr = settings.topic_match_threshold
+    own = next((o for o in topicmatch.topic_selects(_rows_for_match(history), thr)
+                if video_id in o["ids"]), None)
+    if own is None:
+        return [], None, [], 0, 0
+    earlier = [i for i in own["ids"] if i < video_id]
+    if not earlier:
+        return [], None, [], 0, 0
+    nums = [int(x) for x in re.findall(r"\d+", n_raw or "")]
+    n = min(max(1, min(5, nums[0])) if nums else 3, len(earlier))
+    rows_by_id = {int(h["id"]): h for h in history}
+    cols = [{"video": rows_by_id[i], "dims": db.dims_for_video(i) or {}}
+            for i in earlier[-n:]]
+    sel = {"label": own["label"], "anchor": video_id, "m": len(earlier)}
+    return [sel], sel, cols, n, min(5, len(earlier))
+
+
 @app.get("/compare", response_class=HTMLResponse)
-def compare(request: Request, ids: str = "", msg: str = ""):
+def compare(request: Request, ids: str = "", msg: str = "", mode: str = "",
+            topic: str = "", times: str = ""):
     user = session_user(request)
     if user is None:
         return login_redirect(request)
@@ -800,8 +934,25 @@ def compare(request: Request, ids: str = "", msg: str = ""):
         # 「历次对比」是用户看自己成长曲线的页面，管理员同样不再保留入口
         return RedirectResponse("/admin", status_code=303)
     history = db.history_for_user(user["id"])
+    thr = settings.topic_match_threshold
+    topic_options = topicmatch.topic_selects(_rows_for_match(history), thr)
     raw = ",".join(request.query_params.getlist("ids")) or ids
     picked = [int(x) for x in re.findall(r"\d+", raw)][:6]
+    topic_sel = None
+    # 主题+次数双下拉：topic 传簇锚点（簇内最新 id），在簇内取最近 N 次（1~5），跨主题无从选起
+    if not picked and (topic or "").isdigit():
+        opt = next((o for o in topic_options if o["anchor"] == int(topic)), None)
+        if opt:
+            nums = [int(x) for x in re.findall(r"\d+", times or "")]
+            k = max(1, min(5, nums[0])) if nums else min(3, opt["n"])
+            k = min(k, opt["n"])
+            picked = opt["ids"][-k:]
+            topic_sel = {"label": opt["label"], "n": opt["n"], "anchor": opt["anchor"], "times": k}
+    mode_kind = "same" if mode.startswith("same:") else ("cross" if mode.startswith("cross:") else "")
+    if not picked and mode_kind:
+        picked = _mode_ids(history, mode)
+        if not picked:
+            mode_kind = ""
     if not picked:
         picked = [h["id"] for h in history[-3:]]
     chosen = [h for h in history if h["id"] in picked]
@@ -814,7 +965,9 @@ def compare(request: Request, ids: str = "", msg: str = ""):
     return render(request, "compare.html", nav="compare", history=history, data=data,
                   radar=radar, trend=trend, trend_gaze=trend_gaze, deltas=deltas,
                   recurring=db.recurring_issues(user["id"]),
-                  best_worst=db.user_best_worst(user["id"]), msg=msg)
+                  best_worst=db.user_best_worst(user["id"]), msg=msg,
+                  mode=mode_kind, topic_options=topic_options, topic_sel=topic_sel,
+                  threshold=thr)
 
 
 PALETTE = ["#1f5f8b", "#b3341f", "#3d7a4b", "#8a6d1f", "#6b4a8f", "#2b2b2b"]

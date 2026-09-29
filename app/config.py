@@ -242,6 +242,11 @@ ENV_GROUPS: tuple[tuple[str, str, tuple[EnvField, ...]], ...] = (
                  default="0.5", low=0, high=1, step=0.05),
         EnvField("FACE_MAX_FRAMES", "人脸分析帧上限", "int", "face_max_frames",
                  "抽帧多时按此上限等间隔采样。", "影响新任务", default="120", low=1, high=600),
+        EnvField("TOPIC_MATCH_THRESHOLD", "同主题相似度阈值", "float", "topic_match_threshold",
+                 "历次对比的「同一个主题」按模糊匹配判定：写法差异（空格、标点、全角半角、"
+                 "第3届/第三届）都能归到一组。阈值越低归并越宽——0.60 能容错字和简称，"
+                 "但主题相近内容不同的会被拒；短于 4 个字的主题只认完全相同。",
+                 "刷新对比页即生效", default="0.6", low=0.3, high=0.95, step=0.05),
     )),
     ("站点与安全", "会话、上传与分析并发；管理员账号保存后会同步到数据库。", (
         EnvField("SECRET_KEY", "会话签名密钥", "secret", "secret_key",
@@ -387,6 +392,7 @@ class Settings:
     use_face_metrics: bool = field(default_factory=lambda: _flag("USE_FACE_METRICS"))
     face_min_detect: float = field(default_factory=lambda: _float("FACE_MIN_DETECT", 0.5))
     face_max_frames: int = field(default_factory=lambda: _int("FACE_MAX_FRAMES", 120))
+    topic_match_threshold: float = field(default_factory=lambda: _float("TOPIC_MATCH_THRESHOLD", 0.6))
     max_analyzers: int = field(default_factory=lambda: _int("MAX_ANALYZERS", 10))
     max_llm_requests: int = field(default_factory=lambda: _int("MAX_LLM_REQUESTS", 20))
     web_threads: int = field(default_factory=lambda: _int("WEB_THREADS", 64))

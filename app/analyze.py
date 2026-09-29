@@ -608,31 +608,73 @@ def build_narrative(client: QwenClient, rubric: Rubric, agg: Aggregated,
     if not isinstance(data, dict) or not data.get("summary"):
         return fallback_narrative(agg)
     agg_dict = agg.to_dict()
+    sugg = _clean_suggestions(data.get("suggestions"), agg_dict)
+    if not sugg:
+        # 模型没给建议、或给的全是抠不出正文的怪结构：按维度分数兜底，
+        # 报告页宁可看到模板化建议，也不要整段空白
+        sugg = fallback_narrative(agg)["suggestions"]
     return {
         "advantages": [str(x) for x in (data.get("advantages") or []) if str(x).strip()][:8],
         "disadvantages": [str(x) for x in (data.get("disadvantages") or []) if str(x).strip()][:8],
-        "suggestions": _clean_suggestions(data.get("suggestions"), agg_dict),
+        "suggestions": sugg,
         "next_focus": str(data.get("next_focus") or "")[:300],
         "summary": str(data.get("summary") or "")[:4000],
     }
 
 
+_SUGG_TEXT_KEYS = ("action", "fix", "suggestion", "advice", "content", "text",
+                   "how", "tip", "detail", "建议", "改进建议", "怎么做")
+
+
+def _first_str(item: dict, keys: tuple[str, ...]) -> str:
+    for k in keys:
+        v = item.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
 def _clean_suggestions(raw, agg: dict) -> list[dict]:
+    """把模型给的 suggestions 归一成 {priority, dimension, action, example, practice}。
+    模型偶尔不按 schema 的键名来（正文塞进 suggestion/content/建议 甚至中文键），
+    旧实现只认 action/fix，认不出就渲染成"有优先级徽标、整行没字"的空建议；
+    这里按别名清单取正文，仍取不到就拿最长的字符串值兜底，全空则丢弃该行，
+    绝不让空行流到报告页。"""
     names = {d["name"] for d in agg["dimensions"]}
     out: list[dict] = []
     for i, item in enumerate(raw or []):
         if isinstance(item, str):
-            out.append({"priority": i + 1, "dimension": "", "action": item,
-                        "example": "", "practice": ""})
-        elif isinstance(item, dict):
-            dim = str(item.get("dimension") or "")
-            out.append({
-                "priority": int(item.get("priority") or i + 1),
-                "dimension": dim if dim in names else "",
-                "action": str(item.get("action") or item.get("fix") or "")[:500],
-                "example": str(item.get("example") or "")[:600],
-                "practice": str(item.get("practice") or "")[:400],
-            })
+            if item.strip():
+                out.append({"priority": i + 1, "dimension": "", "action": item.strip()[:500],
+                            "example": "", "practice": ""})
+            continue
+        if not isinstance(item, dict):
+            continue
+        dim = str(item.get("dimension") or item.get("维度") or "")
+        action = _first_str(item, _SUGG_TEXT_KEYS)
+        example = _first_str(item, ("example", "示例", "示范"))
+        practice = _first_str(item, ("practice", "练习", "怎么练"))
+        if not action:
+            vals = [v.strip() for v in item.values()
+                    if isinstance(v, str) and v.strip() and v.strip() != dim]
+            action = max(vals, key=len) if vals else ""
+        if not action and example:
+            action, example = example, ""
+        if not action and practice:
+            action, practice = practice, ""
+        if not action:
+            continue
+        try:
+            pri = int(item.get("priority") or i + 1)
+        except (TypeError, ValueError):
+            pri = i + 1
+        out.append({"priority": pri, "dimension": dim if dim in names else "",
+                    "action": action[:500], "example": example[:600],
+                    "practice": practice[:400]})
+    out.sort(key=lambda s: s["priority"])
+    for i, s in enumerate(out):
+        # 空行被丢弃后徽标会跳号（2、3…），重排成连续序号，页面显示才正常
+        s["priority"] = i + 1
     return out[:8]
 
 
