@@ -306,8 +306,12 @@ def main() -> int:
                        "USE_AUDIO_CHANNEL=1\nMAX_VIDEO_MB=500\n", encoding="utf-8")
     cfg.ENV_FILE = scratch
     try:
-        results.append(ok("设置项声明表覆盖 46 个键", len(cfg.ENV_FIELDS) == 46, f"{len(cfg.ENV_FIELDS)} 项"))
+        results.append(ok("设置项声明表覆盖 47 个键", len(cfg.ENV_FIELDS) == 47, f"{len(cfg.ENV_FIELDS)} 项"))
         fields = {f.key: f for f in cfg.ENV_FIELDS}
+        results.append(ok("同主题阈值已声明：默认 0.6 且限定 0.3~0.95",
+                          fields["TOPIC_MATCH_THRESHOLD"].default == "0.6"
+                          and float(fields["TOPIC_MATCH_THRESHOLD"].low) == 0.3
+                          and float(fields["TOPIC_MATCH_THRESHOLD"].high) == 0.95))
         results.append(ok("并发三键已声明且默认值够 10 人同时用",
                           fields["MAX_ANALYZERS"].default == "10"
                           and int(fields["MAX_LLM_REQUESTS"].default) >= 20
@@ -1706,6 +1710,89 @@ def main() -> int:
         settings.api_key = keep_key17
         settings.tts_vc_model = keep_vcmodel17
         shutil.rmtree(vdir17, ignore_errors=True)
+
+    print("\n== 18. 同主题模糊匹配：归一化、阈值、聚类与主题下拉 ==")
+    from app import topicmatch
+
+    thr = settings.topic_match_threshold
+    results.append(ok("写法差异归一：全半角、标点空格、中文数字都能对上",
+                      topicmatch.normalize("第三届「环保」演讲") == topicmatch.normalize("第3届环保演讲"),
+                      topicmatch.normalize("第３届 环保—演讲")))
+    rows18 = [
+        {"id": 1, "topic": "春天", "title": "A1"},
+        {"id": 2, "topic": "环保宣传", "title": "A2"},
+        {"id": 3, "topic": "", "title": "第3届演讲比赛"},
+        {"id": 4, "topic": "演讲比赛第三届", "title": "A4"},
+        {"id": 5, "topic": "演讲比赛 第三届", "title": "A5"},
+    ]
+    ids18 = topicmatch.same_topic_ids(rows18, 5, thr)
+    results.append(ok("同主题圈选：变体写法与空主题回退标题都进组，异主题和短词不进",
+                      ids18 == [3, 4, 5], str(ids18)))
+    results.append(ok("同系列不同届次算同一主题（第二届 vs 第三届）",
+                      topicmatch.same_topic("第二届人工智能大会", "第三届人工智能大会", thr)))
+    results.append(ok("短于 4 字的主题只认完全相同：春天 vs 秋天相似度 0",
+                      topicmatch.similarity("春天", "秋天") == 0.0
+                      and topicmatch.similarity("春天", "春天") == 1.0))
+    results.append(ok("语义无关的主题不误伤",
+                      not topicmatch.same_topic("读书分享", "篮球比赛", thr)))
+    clus18 = topicmatch.cluster([{"id": 1, "topic": "校园环保宣讲会", "title": ""},
+                                 {"id": 2, "topic": "环保宣讲会", "title": ""},
+                                 {"id": 3, "topic": "运动会", "title": ""}], thr)
+    results.append(ok("聚类：相近写法并成一簇，无关主题各自成簇",
+                      [(len(c["members"])) for c in clus18] == [2, 1],
+                      str([(c["label"], len(c["members"])) for c in clus18])))
+    results.append(ok("阈值边界：环保宣传 vs 环保宣讲会相似度 0.571，低于 0.6 不并簇",
+                      not topicmatch.same_topic("环保宣传", "环保宣讲会", thr)))
+    sel18 = topicmatch.topic_selects(rows18, thr)
+    results.append(ok("主题下拉：全部簇都列出（含仅 1 次的），次数多的在前，锚点取簇内最新 id",
+                      [(s["label"], s["n"], s["anchor"]) for s in sel18] ==
+                      [("第3届演讲比赛", 3, 5), ("环保宣传", 1, 2), ("春天", 1, 1)],
+                      str([(s["label"], s["n"], s["anchor"]) for s in sel18])))
+
+    print("\n== 19. 改进建议清洗：键名漂移兼容、空行丢弃与整组兜底 ==")
+    agg19 = {"dimensions": [{"name": "内容结构"}, {"name": "舞台表现"}]}
+    s19a = analyze._clean_suggestions(
+        [{"priority": 1, "dimension": "内容结构", "action": "列三点式展开",
+          "example": "第一…", "practice": "重讲一遍"},
+         {"priority": 2, "dimension": "不存在的维度", "suggestion": "开头用提问钩住主题"}], agg19)
+    results.append(ok("建议清洗：标准 schema 全字段取齐；异名键 suggestion 也当正文；越界维度名清空",
+                      s19a[0]["action"] == "列三点式展开" and s19a[0]["dimension"] == "内容结构"
+                      and s19a[1]["action"] == "开头用提问钩住主题" and s19a[1]["dimension"] == "",
+                      str(s19a)))
+    s19b = analyze._clean_suggestions(
+        [{"priority": "二", "建议": "手势别插兜", "示例": "把手放在中线"},
+         {"point": "把结尾从口号改成回扣主题的一句行动号召"}], agg19)
+    results.append(ok("建议清洗：中文键名与陌生键（取最长字符串值）都兜得住，priority 非法回落序号",
+                      s19b[0]["action"] == "手势别插兜" and s19b[0]["example"] == "把手放在中线"
+                      and s19b[0]["priority"] == 1 and s19b[1]["priority"] == 2
+                      and s19b[1]["action"].startswith("把结尾"), str(s19b)))
+    s19c = analyze._clean_suggestions(
+        [{"priority": 1}, {"priority": 2, "example": "只有示例也要能看"}, "纯字符串建议", "  "], agg19)
+    results.append(ok("建议清洗：只有示例的提为正文、字符串项保留、全空行与空串丢弃（不再出现空徽标行）",
+                      [x["action"] for x in s19c] == ["只有示例也要能看", "纯字符串建议"], str(s19c)))
+
+    class _NarrStub:
+        def chat(self, prompt, system="", **kw):
+            return Completion(text=self.payload, model="mock", usage=None)
+
+    narr_stub = _NarrStub()
+    narr_stub.payload = json.dumps(
+        {"summary": "整体尚可。", "advantages": ["流畅"], "disadvantages": ["结构散"],
+         "suggestions": [{"priority": 1}, {"priority": 2}]}, ensure_ascii=False)
+    agg19obj = analyze.Aggregated(
+        dimensions=[{"key": "content", "name": "内容结构", "score": 4, "max_score": 25,
+                     "ratio": 0.16, "confidence": 0.8, "notes": "", "strengths": [],
+                     "issues": [{"desc": "结构散", "fix": "", "example": "", "quote": "",
+                                 "at": "", "evidence_ok": False}]},
+                    {"key": "delivery", "name": "舞台表现", "score": 20, "max_score": 25,
+                     "ratio": 0.8, "confidence": 0.9, "notes": "", "strengths": ["流畅"],
+                     "issues": []}],
+        total=24, max_total=50, band="C", pct=48.0)
+    narr19 = analyze.build_narrative(narr_stub, rubric, agg19obj, "转写正文", "环保宣讲")
+    results.append(ok("建议清洗：模型给的全是抠不出正文的空壳时整组回落维度兜底，报告页不出现空建议段",
+                      len(narr19["suggestions"]) >= 1
+                      and all(str(s.get("action") or "").strip() for s in narr19["suggestions"])
+                      and narr19["summary"] == "整体尚可。", str(narr19["suggestions"])))
 
     print("\n" + "=" * 56)
     passed = sum(1 for r in results if r)

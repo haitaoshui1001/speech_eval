@@ -12,6 +12,7 @@ import re
 import shutil
 import sys
 import time
+from contextlib import redirect_stdout
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -40,6 +41,7 @@ from app.security import make_session_token  # noqa: E402
 
 SAMPLE = BASE / "tests" / "sample_speech.mp4"
 RESULTS: list[tuple[bool, str]] = []
+UPLOAD_LOG: list[str] = []
 
 
 def check(ok: bool, label: str, extra: str = "") -> None:
@@ -76,12 +78,19 @@ def wait_done(client: TestClient, vid: int, timeout: int = 300) -> str:
 
 def upload(client: TestClient, title: str, auto: bool = True, path: Path = SAMPLE,
            topic: str = "Will AI replace English teachers?") -> int:
+    global UPLOAD_LOG
     with path.open("rb") as fh:
-        r = client.post("/videos",
-                        data={"title": title, "topic": topic,
-                              "requirements": "2-3 minutes", "auto": "1" if auto else ""},
-                        files={"video": (f"{title}.mp4", fh, "video/mp4")},
-                        follow_redirects=False)
+        buf = io.StringIO()
+        # 服务端在 upload() 里 print 的分段计时日志，只有把 stdout 临时接住才拿得到
+        with redirect_stdout(buf):
+            r = client.post("/videos",
+                            data={"title": title, "topic": topic,
+                                  "requirements": "2-3 minutes", "auto": "1" if auto else ""},
+                            files={"video": (f"{title}.mp4", fh, "video/mp4")},
+                            follow_redirects=False)
+        text = buf.getvalue()
+        sys.stdout.write(text)
+        UPLOAD_LOG = [ln for ln in text.splitlines() if ln.startswith("[上传] ")]
     assert r.status_code == 303, r.status_code
     loc = r.headers["location"]
     if loc.startswith("/videos/"):
@@ -194,7 +203,11 @@ def main() -> int:
                                                       "password": "pw-mallory-1"},
                           follow_redirects=False).status_code == 303,
               "未登录不能建号")
-        check(client.get("/static/style.css").status_code == 200, "/static/style.css 已挂载")
+        cssr = client.get("/static/style.css")
+        check(cssr.status_code == 200, "/static/style.css 已挂载")
+        check("::file-selector-button" in cssr.text and ".pct-big" in cssr.text
+              and ".tag-wrap .tag" in cssr.text,
+              "样式就位：选择文件按钮同档放大、百分比读数加大、长标签可换行")
         check(client.get("/nope").status_code == 404, "未知路径 404")
 
         # ------------------------------------------------------------ 管理员建号 → 用户登录
@@ -243,6 +256,21 @@ def main() -> int:
         check(client.cookies.get("sid") is not None, "会话 Cookie 已下发")
         page(client, "/dashboard", "小艾", "退出", "上传", "我的演讲", "历次对比",
              label="普通用户的个人页面入口照常保留")
+        dash = client.get("/dashboard").text
+        i0 = dash.find('class="upload-form"')
+        upload_form = dash[i0:dash.find("</form>", i0)] if i0 >= 0 else ""
+        check(i0 >= 0 and "grid-2" not in upload_form
+              and upload_form.count('class="field"') == 4,
+              "上传表单四框纵向平铺：一框一行、无两列网格")
+        check('id="up-prog"' in dash and "xhr.upload" in dash and "xhr.responseURL" in dash,
+              "上传进度视图与 XHR 接管脚本就位（无在跑任务时也照常输出）")
+        check("请勿刷新或关闭本页" in dash and "取消上传" in dash and "入库入队" in dash,
+              "上传进度视图给出防呆提示、取消按钮与服务端收尾阶段")
+        check('<textarea id="topic" name="topic"' in upload_form,
+              "演讲题目改用多行文本框，整句长题目可自动换行")
+        check("e.submitter" in dash and "new FormData(form, submitter)" in dash
+              and "autoValue(submitter)" in dash,
+              "接管脚本把被点的提交按钮一并交给 FormData，auto=1 不再丢失")
         r = client.post("/login", data={"username": "alice", "password": "wrong"}, follow_redirects=False)
         check(r.status_code == 200 and "口令" in r.text, "错误口令回到表单且不建会话")
 
@@ -251,6 +279,10 @@ def main() -> int:
         v1 = upload(client, "第一次演讲")
         s1 = wait_done(client, v1)
         check(s1.startswith("done"), f"视频 1 分析完成", s1)
+        tl = UPLOAD_LOG[-1] if UPLOAD_LOG else ""
+        check(tl.startswith("[上传] ") and "接收 " in tl and "转存 " in tl
+              and "入库 " in tl and "入队 " in tl and "→ /videos/" in tl,
+              "上传打印分段计时日志：接收/转存/入库/入队 + 跳转去向", tl)
         v2 = upload(client, "第二次演讲")
         s2 = wait_done(client, v2)
         check(s2.startswith("done"), "视频 2 分析完成", s2)
@@ -277,6 +309,20 @@ def main() -> int:
         check(all(0 <= d["score"] <= d["max_score"] for d in dims.values()), "各维度分数在满分区间内")
         check(abs(sum(d["score"] for d in dims.values()) - float(ev["total"])) < 0.51,
               "维度之和 ≈ 总分", f"{sum(d['score'] for d in dims.values())} vs {ev['total']}")
+
+        # 模型把栏目标签回显进 next_focus 时，渲染前剥离，历史报告一并修好，不必重跑分析。
+        dirty = dict(payload)
+        dirty["next_focus"] = "下一步只练一件事：每段结尾补一句回扣主题的短句"
+        with db.get_conn() as c:
+            c.execute("UPDATE evaluations SET payload = ? WHERE id = ?",
+                      (json.dumps(dirty, ensure_ascii=False), ev["id"]))
+        nb = client.get(f"/videos/{v1}").text
+        check(nb.count("下一步只练一件事") == 1 and "每段结尾补一句回扣主题的短句" in nb,
+              "「下一步只练一件事」只印一次，正文里重复的栏目标签被剥离",
+              f"{nb.count('下一步只练一件事')} 次")
+        with db.get_conn() as c:
+            c.execute("UPDATE evaluations SET payload = ? WHERE id = ?",
+                      (json.dumps(payload, ensure_ascii=False), ev["id"]))
 
         # ------------------------------------------------------------ 播放与资源
         r = client.get(f"/videos/{v1}/play", headers={"Range": "bytes=0-1023"})
@@ -528,6 +574,36 @@ def main() -> int:
         page(client, f"/compare?ids={v1}", "", absent=("维度轮廓",), label="仅选一次时不画对比图")
         page(client, "/compare?ids=abc", "", label="非法 ids 不崩")
         page(client, "/compare?ids=999999", "", label="不存在的 id 不崩")
+        ct2 = page(client, f"/compare?topic={v2}&times=2", "维度轮廓", "已按主题",
+                   label="主题双下拉：取该主题最近两次")
+        check("对比最近 2 次" in ct2, "主题对比横幅说明取次数")
+        page(client, f"/compare?topic={v2}&times=1", "已按主题", absent=("维度轮廓",),
+             label="次数下拉可选 1：只回看最近一次不画对比图")
+        page(client, f"/compare?topic={v2}&times=9", "维度轮廓",
+             label="次数超限自动压到 5 再压回簇内次数")
+        page(client, "/compare?topic=abc&times=x", "", label="非法 topic/times 不崩")
+        page(client, "/compare?topic=999999", "", absent=("已按主题",),
+             label="不存在的主题锚点不崩且不误报横幅")
+
+        cb_same = page(client, f"/compare?mode=same:{v2}", "模糊同主题", "回到默认", "维度轮廓",
+                       label="对比页 mode=same：与锚点同主题的全部自动圈选")
+        check("第 3 届 / 第三届" in cb_same, "同主题横幅说明模糊容错口径")
+        cb_cross = page(client, f"/compare?mode=cross:{v2}", "主题分组", "各取最新一次",
+                        absent=("维度轮廓",), label="只有一个主题簇时跨主题只圈出簇内最新")
+        check("已按" in cb_cross, "跨主题模式也带说明横幅")
+        page(client, "/compare?mode=same:notanid", "", absent=("已按",),
+             label="mode 里的锚点 id 非法时静默回退默认，不误导横幅")
+        cbar = client.get("/compare").text
+        check('name="topic"' in cbar and 'name="times"' in cbar and f'value="{v2}"' in cbar
+              and "按主题快选" not in cbar and 'name="ids"' not in cbar,
+              "对比页改为主题+次数双下拉，旧勾选表与快选 chip 已移除")
+        check("Will AI replace English teachers?（共 2 次）" in cbar
+              and "replace Engli…" not in cbar and "无法对比" not in cbar,
+              "主题下拉把题目原文整句写进 DOM，超长只交 CSS 视觉截断，省略号不进 HTML")
+        check('class="pick-topic"' in cbar and 'class="pick-times"' in cbar
+              and "row-actions pick-bar" in cbar
+              and '<label class="dim-text" for="cmp-topic">选择主题</label>' in cbar,
+              "双下拉挂 .pick-bar 共用尺寸，标签去掉 12px 内联小字")
 
         # ------------------------------------------------------------ 微表情与逐帧测量
         # 样例视频是合成画面，Haar 检不出人脸，正确行为是「如实说明未采信」而不是编指标。
@@ -573,6 +649,36 @@ def main() -> int:
         check("62%" in cb and "90%" in cb, "折线点标注实测百分比")
         page(client, f"/videos/{v2}", "本地逐帧测量", absent=("正脸率 62%",),
              label="未测量视频不借用他人的微表情数据")
+        rp = page(client, f"/videos/{v2}", "与同主题最近 1 次逐项对照", 'name="vs_topic"', 'name="vs_n"',
+                  "Will AI replace English teachers?", label="报告页对照区为主题+次数双下拉，主题显示数据库题目原文")
+        check('class="inline-form pick-bar"' in rp and 'class="pick-topic"' in rp
+              and 'class="pick-times"' in rp and "for=\"vs-topic\">选择主题</label>" in rp,
+              "报告页对照区与对比页共用 .pick-bar 尺寸，标签文案统一为选择主题/对比次数")
+        check("#vs-box" in rp and "vs_topic=" in rp, "对照表单走 vs_topic/vs_n 参数并锚定对照区")
+        check("同主题2次对比" not in rp and "对照对象" not in rp,
+              "旧的单向下拉与同主题跳转链接已移除")
+        check("近1 = 本主题中距本次最近的一次" in rp, "多列对照表说明近1与Δ口径")
+        it = rp.find('name="vs_topic"')
+        vs_opt_tag = rp[it:rp.find("</select>", it)] if it >= 0 else ""
+        check(vs_opt_tag.count("<option") == 1 and f'value="{v2}"' in vs_opt_tag,
+              "对照区主题下拉只列本次主题一项，跨主题对照无从选起")
+        check("与同主题上次对比" in rp and "较同主题上次" in rp,
+              "总分卡的「上次」按同主题口径命名并给出对比入口")
+        check("与同主题最近 1 次逐项对照" in client.get(f"/videos/{v2}?vs_topic={v2}&vs_n=1").text,
+              "显式 vs_topic+vs_n=1 正常渲染")
+        check("与同主题最近 1 次逐项对照" in client.get(f"/videos/{v2}?vs_n=9").text,
+              "vs_n 超限先压到 5 再压回可用次数")
+        check(client.get(f"/videos/{v2}?vs_topic=999999&vs_n=abc").status_code == 200,
+              "非法 vs_topic/vs_n 不崩且回落默认")
+        check("逐项对照" not in client.get(f"/videos/{v1}").text, "最早一次没有对照区")
+        vn = upload(client, "新主题第一次", topic="Give a speech about campus life")
+        sn = wait_done(client, vn)
+        check(sn.startswith("done"), "换一个主题的第 3 次分析照常完成", sn)
+        fresh = client.get(f"/videos/{vn}").text
+        check('id="vs-box"' not in fresh and "逐项对照" not in fresh
+              and "较同主题上次" not in fresh and "与同主题上次对比" not in fresh,
+              "本次主题之前没有同主题分析：对照区整块不显示，也不回落到别的主题")
+        client.post(f"/videos/{vn}/delete", follow_redirects=False)
         patch_face(v1, fc, None)
         patch_face(v2, None, None)
 
@@ -850,6 +956,8 @@ def main() -> int:
         outcome = wait_done(client, vid, timeout=180)
         check(outcome.startswith("failed"), "损坏文件进入失败态而非卡住", outcome)
         page(client, f"/videos/{vid}", "分析中断", "重新", label="进度页展示失败与重试入口")
+        page(client, f"/videos/{vid}", 'class="tag tag-wrap"',
+             label="进度页题目胶囊带换行变体（长题目不撑破页宽）")
         check(client.get("/dashboard").text.count("失败") >= 1, "列表可见失败状态")
 
         # ------------------------------------------------------------ 重启自愈
