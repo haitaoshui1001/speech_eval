@@ -6,7 +6,7 @@
   * 两竖栏：左侧可点击目录（滚动高亮 + 筛选），右侧正文
   * 标题 1 / 1.1 / 1.1.1 顶格；黑体标题 + 宋体正文；相邻两级标题差一个字号
   * 1.25 倍行距；段间距 1.25 倍行距；正文首行缩进 2 字符
-  * 流程图用 mermaid，图旁有"取 mermaid 源码"按钮；无网络时降级为源码视图
+  * 流程图用 mermaid，图旁有"取 mermaid 源码"按钮与放大/缩小/还原控件；无网络时降级为源码视图
   * 页面自带下载按钮；多份 HTML 另外产出 zip 打包件
 
 环境相关值（公网 IP、发布包日期）只在**生成时注入 HTML**，不写回 Markdown 源：
@@ -219,7 +219,10 @@ def render_mermaid(source: str, number: int) -> str:
         '<div class="bar"><span class="chip">mermaid 流程图</span>'
         '<span class="state" data-state="wait">等待渲染…</span>'
         '<button type="button" class="btn mmd-btn" data-target="mmd-{n}">取 mermaid 源码</button>'
-        '<button type="button" class="btn cp-btn" data-target="mmd-{n}">复制源码</button></div>'
+        '<button type="button" class="btn cp-btn" data-target="mmd-{n}">复制源码</button>'
+        '<button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button>'
+        '<button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button>'
+        '<button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div>'
     ).format(n=number)
     stage = '<div class="stage" id="stage-{n}"><pre class="pending">{s}</pre></div>'.format(n=number, s=esc)
     return '<figure class="mmd">' + bar + stage + '<pre class="mmdsrc" id="mmd-{n}" hidden>{s}</pre></figure>'.format(
@@ -543,6 +546,29 @@ JS = r"""
       fig.classList.toggle('showsrc', open);
       b.classList.toggle('on', open);
       b.textContent = open ? '收起 mermaid 源码' : '取 mermaid 源码';
+    });
+  });
+
+  function zoomFig(fig, act) {
+    var svg = fig.querySelector('.stage svg');
+    if (!svg) return;
+    if (!fig.dataset.base) {
+      var w = Math.round(svg.getBoundingClientRect().width);
+      fig.dataset.base = String(w > 0 ? w : 640);
+    }
+    var z = parseFloat(fig.dataset.zoom || '1');
+    if (act === 'in') z = Math.min(3, Math.round((z + 0.25) * 100) / 100);
+    else if (act === 'out') z = Math.max(0.5, Math.round((z - 0.25) * 100) / 100);
+    else z = 1;
+    fig.dataset.zoom = String(z);
+    if (z === 1) { svg.style.maxWidth = ''; svg.style.width = ''; }
+    else { svg.style.maxWidth = 'none'; svg.style.width = (parseFloat(fig.dataset.base) * z) + 'px'; }
+    setState(fig, z === 1 ? '已渲染 · 源码可取' : '缩放 ' + Math.round(z * 100) + '%', z === 1 ? 'ok' : 'wait');
+  }
+  document.querySelectorAll('.z-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var fig = b.closest('figure.mmd');
+      if (fig) zoomFig(fig, b.dataset.act);
     });
   });
 
