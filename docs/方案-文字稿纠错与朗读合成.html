@@ -1,0 +1,1939 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>演讲评分系统 · 文字稿纠错与朗读合成方案</title>
+<style>
+:root{
+  --lh:1.25;                 /* 全文 1.25 倍行距 */
+  --gap:1.5625em;            /* 段间距 = 1.25 倍行距 */
+  --font-head:"SimHei","Heiti SC","Microsoft YaHei","微软雅黑",sans-serif;
+  --font-body:"SimSun","Songti SC","宋体","Microsoft YaHei",serif;
+  --font-mono:"Consolas","JetBrains Mono","Courier New",monospace;
+  --accent:#0f766e; --accent-soft:#e8f4f2; --accent-line:#c3ded9;
+  --ink:#1f2933; --ink-soft:#5b6773; --line:#e2e8ee; --bg:#f7faf9; --panel:#fff;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);
+  font-size:12pt;line-height:var(--lh);-webkit-text-size-adjust:100%}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+header.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.95);
+  border-bottom:1px solid var(--line);backdrop-filter:blur(4px)}
+.topin{max-width:1360px;margin:0 auto;padding:9px 24px;display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+.topin .h{font-family:var(--font-head);font-weight:700;font-size:13pt;letter-spacing:.4px}
+.topin .sub{color:var(--ink-soft);font-size:10pt}
+.topin .tools{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-family:var(--font-body);font-size:10pt;line-height:1.5;padding:3px 9px;
+  border:1px solid var(--accent-line);background:#fff;color:var(--accent);border-radius:4px;cursor:pointer}
+.btn:hover{background:var(--accent-soft);text-decoration:none}
+.btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ghost{border-color:var(--line);color:var(--ink-soft)}
+
+.layout{max-width:1360px;margin:0 auto;padding:0 24px 60px;display:grid;
+  grid-template-columns:302px minmax(0,1fr);gap:30px;align-items:start}
+nav.side{position:sticky;top:50px;max-height:calc(100vh - 50px);overflow:auto;scroll-behavior:auto;padding:18px 6px 40px}
+nav.side .navtitle{font-family:var(--font-head);font-weight:700;font-size:11.5pt;margin:0 0 8px}
+nav.side .navswitch{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap}
+nav.side .search{margin:0 0 10px}
+nav.side input{width:100%;font-family:var(--font-body);font-size:10pt;padding:5px 8px;
+  border:1px solid var(--line);border-radius:4px;background:#fff}
+ul.toclist{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+ul.toclist li{margin:0}
+ul.toclist li a{display:block;padding:4px 8px;margin-left:-2px;border-left:2px solid transparent;
+  color:var(--ink-soft);font-size:10pt;line-height:1.3}
+ul.toclist li.l2>a{font-family:var(--font-head);font-size:10.5pt;color:var(--ink)}
+ul.toclist li.l3>a{padding-left:20px}
+ul.toclist li.l4>a{padding-left:36px;font-size:9.5pt}
+ul.toclist li a:hover{background:var(--accent-soft);color:var(--accent);text-decoration:none}
+ul.toclist li a.active{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent);font-weight:700}
+ul.toclist li.hide{display:none}
+
+main{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:30px 40px 54px}
+p.kicker{color:var(--ink-soft);font-size:9.5pt;margin:0 0 22px;text-indent:0;
+  padding-bottom:10px;border-bottom:1px dashed var(--line)}
+
+h1,h2,h3,h4,h5,h6{font-family:var(--font-head);font-weight:700;line-height:var(--lh);
+  margin:0 0 .55em;text-indent:0;padding:0;color:var(--ink);scroll-margin-top:64px;text-align:left}
+h1{font-size:26pt;margin-bottom:.4em;padding-bottom:.25em;border-bottom:3px solid var(--accent)}
+h2{font-size:18pt;margin-top:1.9em;padding-bottom:.15em;border-bottom:1px solid var(--accent-line)}
+h3{font-size:16pt;margin-top:1.5em}
+h4{font-size:15pt;margin-top:1.3em}
+h5{font-size:14pt;margin-top:1.2em}
+h6{font-size:12pt;margin-top:1.2em}
+
+article p{margin:0 0 var(--gap);text-indent:2em}
+article li p,article td p,article th p,article blockquote p,p.kicker{text-indent:0}
+article ul,article ol{margin:0 0 var(--gap);padding-left:2.4em}
+article li{margin:0 0 .28em}
+article blockquote{margin:0 0 var(--gap);padding:.7em 1em;background:var(--accent-soft);
+  border-left:4px solid var(--accent);border-radius:0 6px 6px 0}
+article hr{border:0;border-top:1px solid var(--line);margin:1.8em 0}
+article strong{font-family:var(--font-head)}
+del{color:#9aa5b1}
+code{font-family:var(--font-mono);font-size:.92em;background:#f1f4f5;border:1px solid #e3e9eb;
+  border-radius:3px;padding:.02em .28em;color:#0b5f57}
+table{border-collapse:collapse;width:100%;margin:0 0 var(--gap);font-size:10.5pt;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top;line-height:1.3}
+th{background:#f2f6f5;font-family:var(--font-head);white-space:nowrap}
+tbody tr:nth-child(even){background:#fbfdfd}
+
+.codeline,figure.mmd{margin:0 0 var(--gap);border:1px solid var(--line);border-radius:6px;background:#fff;overflow:hidden}
+.bar{display:flex;align-items:center;gap:8px;padding:4px 10px;background:#f4f7f7;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.chip{font-family:var(--font-mono);font-size:8.5pt;color:var(--ink-soft);letter-spacing:.6px;text-transform:uppercase}
+.state{font-size:9pt;color:var(--ink-soft)}
+.state[data-state="ok"]{color:#0f766e}
+.state[data-state="off"]{color:#9a5b00}
+.bar .btn{margin-left:0}
+.bar .cp-btn{margin-left:auto}
+.codeslot{overflow:hidden}
+.codehilite{background:#fcfdfd}
+.codehilite pre,.pending,.mmdsrc{margin:0;padding:12px 14px;font-family:var(--font-mono);
+  font-size:10pt;line-height:1.5;overflow-x:auto;white-space:pre;background:#fcfdfd}
+.pending{font-family:var(--font-mono);font-size:10pt;color:var(--ink-soft);text-align:left}
+figure.mmd .stage{padding:16px;overflow-x:auto;text-align:center;min-height:40px}
+figure.mmd .stage svg{max-width:100%;height:auto}
+figure.mmd .stage .pending{background:#fff}
+figure.mmd.off .stage{display:none}
+figure.mmd .mmdsrc{display:none;border-top:1px solid var(--line);background:#fbfcfc;text-align:left}
+figure.mmd.off .mmdsrc,figure.mmd.showsrc .mmdsrc{display:block}
+
+.pagefoot{max-width:1360px;margin:0 auto;padding:0 24px;color:var(--ink-soft);font-size:9.5pt}
+.toast{position:fixed;right:18px;bottom:18px;z-index:60;background:var(--ink);color:#fff;font-size:10pt;
+  padding:8px 14px;border-radius:6px;opacity:0;transition:opacity .18s;pointer-events:none}
+.toast.show{opacity:.94}
+
+@media (max-width:1080px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:0}
+  nav.side{position:static;max-height:none;padding-bottom:14px;border-bottom:1px solid var(--line)}
+  main{border-radius:0;border-left:0;border-right:0}
+  .topin .tools{margin-left:0;width:100%}
+}
+@media print{
+  header.top,nav.side,.pagefoot,.bar,.toast{display:none!important}
+  body{background:#fff;font-size:10.5pt}
+  .layout{display:block;max-width:none;padding:0}
+  main{border:0;padding:0;border-radius:0}
+  h2{break-after:avoid}
+  figure.mmd,.codeline,table{break-inside:avoid}
+}
+
+pre { line-height: 125%; }
+td.linenos .normal { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+.codehilite .hll { background-color: #ffffcc }
+.codehilite { background: #f8f8f8; }
+.codehilite .c { color: #3D7B7B; font-style: italic } /* Comment */
+.codehilite .err { border: 1px solid #FF0000 } /* Error */
+.codehilite .k { color: #008000; font-weight: bold } /* Keyword */
+.codehilite .o { color: #666666 } /* Operator */
+.codehilite .ch { color: #3D7B7B; font-style: italic } /* Comment.Hashbang */
+.codehilite .cm { color: #3D7B7B; font-style: italic } /* Comment.Multiline */
+.codehilite .cp { color: #9C6500 } /* Comment.Preproc */
+.codehilite .cpf { color: #3D7B7B; font-style: italic } /* Comment.PreprocFile */
+.codehilite .c1 { color: #3D7B7B; font-style: italic } /* Comment.Single */
+.codehilite .cs { color: #3D7B7B; font-style: italic } /* Comment.Special */
+.codehilite .gd { color: #A00000 } /* Generic.Deleted */
+.codehilite .ge { font-style: italic } /* Generic.Emph */
+.codehilite .gr { color: #E40000 } /* Generic.Error */
+.codehilite .gh { color: #000080; font-weight: bold } /* Generic.Heading */
+.codehilite .gi { color: #008400 } /* Generic.Inserted */
+.codehilite .go { color: #717171 } /* Generic.Output */
+.codehilite .gp { color: #000080; font-weight: bold } /* Generic.Prompt */
+.codehilite .gs { font-weight: bold } /* Generic.Strong */
+.codehilite .gu { color: #800080; font-weight: bold } /* Generic.Subheading */
+.codehilite .gt { color: #0044DD } /* Generic.Traceback */
+.codehilite .kc { color: #008000; font-weight: bold } /* Keyword.Constant */
+.codehilite .kd { color: #008000; font-weight: bold } /* Keyword.Declaration */
+.codehilite .kn { color: #008000; font-weight: bold } /* Keyword.Namespace */
+.codehilite .kp { color: #008000 } /* Keyword.Pseudo */
+.codehilite .kr { color: #008000; font-weight: bold } /* Keyword.Reserved */
+.codehilite .kt { color: #B00040 } /* Keyword.Type */
+.codehilite .m { color: #666666 } /* Literal.Number */
+.codehilite .s { color: #BA2121 } /* Literal.String */
+.codehilite .na { color: #687822 } /* Name.Attribute */
+.codehilite .nb { color: #008000 } /* Name.Builtin */
+.codehilite .nc { color: #0000FF; font-weight: bold } /* Name.Class */
+.codehilite .no { color: #880000 } /* Name.Constant */
+.codehilite .nd { color: #AA22FF } /* Name.Decorator */
+.codehilite .ni { color: #717171; font-weight: bold } /* Name.Entity */
+.codehilite .ne { color: #CB3F38; font-weight: bold } /* Name.Exception */
+.codehilite .nf { color: #0000FF } /* Name.Function */
+.codehilite .nl { color: #767600 } /* Name.Label */
+.codehilite .nn { color: #0000FF; font-weight: bold } /* Name.Namespace */
+.codehilite .nt { color: #008000; font-weight: bold } /* Name.Tag */
+.codehilite .nv { color: #19177C } /* Name.Variable */
+.codehilite .ow { color: #AA22FF; font-weight: bold } /* Operator.Word */
+.codehilite .w { color: #bbbbbb } /* Text.Whitespace */
+.codehilite .mb { color: #666666 } /* Literal.Number.Bin */
+.codehilite .mf { color: #666666 } /* Literal.Number.Float */
+.codehilite .mh { color: #666666 } /* Literal.Number.Hex */
+.codehilite .mi { color: #666666 } /* Literal.Number.Integer */
+.codehilite .mo { color: #666666 } /* Literal.Number.Oct */
+.codehilite .sa { color: #BA2121 } /* Literal.String.Affix */
+.codehilite .sb { color: #BA2121 } /* Literal.String.Backtick */
+.codehilite .sc { color: #BA2121 } /* Literal.String.Char */
+.codehilite .dl { color: #BA2121 } /* Literal.String.Delimiter */
+.codehilite .sd { color: #BA2121; font-style: italic } /* Literal.String.Doc */
+.codehilite .s2 { color: #BA2121 } /* Literal.String.Double */
+.codehilite .se { color: #AA5D1F; font-weight: bold } /* Literal.String.Escape */
+.codehilite .sh { color: #BA2121 } /* Literal.String.Heredoc */
+.codehilite .si { color: #A45A77; font-weight: bold } /* Literal.String.Interpol */
+.codehilite .sx { color: #008000 } /* Literal.String.Other */
+.codehilite .sr { color: #A45A77 } /* Literal.String.Regex */
+.codehilite .s1 { color: #BA2121 } /* Literal.String.Single */
+.codehilite .ss { color: #19177C } /* Literal.String.Symbol */
+.codehilite .bp { color: #008000 } /* Name.Builtin.Pseudo */
+.codehilite .fm { color: #0000FF } /* Name.Function.Magic */
+.codehilite .vc { color: #19177C } /* Name.Variable.Class */
+.codehilite .vg { color: #19177C } /* Name.Variable.Global */
+.codehilite .vi { color: #19177C } /* Name.Variable.Instance */
+.codehilite .vm { color: #19177C } /* Name.Variable.Magic */
+.codehilite .il { color: #666666 } /* Literal.Number.Integer.Long */
+body.showallsrc figure.mmd .mmdsrc{display:block}
+</style>
+</head>
+<body>
+<header class="top"><div class="topin">
+  <span class="h">演讲评分系统 · 文字稿纠错与朗读合成方案</span><span class="sub">待决策：转写稿订正 + 主题化小改与确认门 + 在线 TTS 朗读</span>
+  <span class="tools">
+    <button type="button" class="btn" id="btn-download">下载本页 HTML</button>
+    <button type="button" class="btn ghost" id="btn-expand">展开全部源码</button>
+    <a class="btn ghost" href="演讲评分系统-文档包-20260928.zip" download="演讲评分系统-文档包-20260928.zip">打包下载（5 份 HTML）</a>
+    <button type="button" class="btn ghost" id="btn-print">打印 / 存 PDF</button>
+  </span>
+</div></header>
+
+<div class="layout">
+  <nav class="side" aria-label="目录">
+    <div class="navswitch"><a class="btn ghost" href="项目建议书与方案报告.html">项目建议书</a> <a class="btn ghost" href="设计报告.html">设计报告</a> <a class="btn ghost" href="部署手册.html">部署手册</a> <a class="btn ghost" href="方案-版本指纹与压缩闸门.html">方案·版本与闸门</a> <a class="btn on" href="方案-文字稿纠错与朗读合成.html">方案·改稿与朗读</a></div>
+    <p class="navtitle">目录</p>
+    <div class="search"><input id="q" type="search" placeholder="筛选目录…" aria-label="筛选目录"></div>
+    <div id="tocnav"><ul class="toclist">
+<li class="l2"><a href="#1-结论先行" title="1. 结论先行">1. 结论先行</a></li>
+<li class="l3"><a href="#11-先回答那个问题：这三件事都没做过" title="1.1 先回答那个问题：这三件事都没做过">1.1 先回答那个问题：这三件事都没做过</a></li>
+<li class="l3"><a href="#12-三条硬结论" title="1.2 三条硬结论">1.2 三条硬结论</a></li>
+<li class="l3"><a href="#13-需要拍板的四个决策点" title="1.3 需要拍板的四个决策点">1.3 需要拍板的四个决策点</a></li>
+<li class="l2"><a href="#2-现状调研" title="2. 现状调研">2. 现状调研</a></li>
+<li class="l3"><a href="#21-转写链路有什么" title="2.1 转写链路有什么">2.1 转写链路有什么</a></li>
+<li class="l3"><a href="#22-transcript-在下游只被读，从不被写" title="2.2 transcript 在下游只被&quot;读&quot;，从不被&quot;写&quot;">2.2 transcript 在下游只被&quot;读&quot;，从不被&quot;写&quot;</a></li>
+<li class="l3"><a href="#23-模型调用抽象只有一个端点" title="2.3 模型调用抽象只有一个端点">2.3 模型调用抽象只有一个端点</a></li>
+<li class="l3"><a href="#24-可以直接复用的现成件" title="2.4 可以直接复用的现成件">2.4 可以直接复用的现成件</a></li>
+<li class="l3"><a href="#25-缺口清单" title="2.5 缺口清单">2.5 缺口清单</a></li>
+<li class="l2"><a href="#3-百炼-tts-能力盘点（选型依据）" title="3. 百炼 TTS 能力盘点（选型依据）">3. 百炼 TTS 能力盘点（选型依据）</a></li>
+<li class="l3"><a href="#31-三条候选通道" title="3.1 三条候选通道">3.1 三条候选通道</a></li>
+<li class="l3"><a href="#32-四条硬约束" title="3.2 四条硬约束">3.2 四条硬约束</a></li>
+<li class="l3"><a href="#33-选型结论与降级链" title="3.3 选型结论与降级链">3.3 选型结论与降级链</a></li>
+<li class="l3"><a href="#34-步骤-0-通道实测记录（已完成）" title="3.4 步骤 0 通道实测记录（已完成）">3.4 步骤 0 通道实测记录（已完成）</a></li>
+<li class="l2"><a href="#4-a-线-·-文字稿纠错" title="4. A 线 · 文字稿纠错">4. A 线 · 文字稿纠错</a></li>
+<li class="l3"><a href="#41-数据流" title="4.1 数据流">4.1 数据流</a></li>
+<li class="l3"><a href="#42-只收-diff，不收整稿" title="4.2 只收 diff，不收整稿">4.2 只收 diff，不收整稿</a></li>
+<li class="l3"><a href="#43-五条改幅红线" title="4.3 五条改幅红线">4.3 五条改幅红线</a></li>
+<li class="l3"><a href="#44-评分口径不随之改变" title="4.4 评分口径不随之改变">4.4 评分口径不随之改变</a></li>
+<li class="l3"><a href="#45-改动清单与自测" title="4.5 改动清单与自测">4.5 改动清单与自测</a></li>
+<li class="l2"><a href="#5-b-线-·-结合主题的小改-学生确认门" title="5. B 线 · 结合主题的小改 + 学生确认门">5. B 线 · 结合主题的小改 + 学生确认门</a></li>
+<li class="l3"><a href="#51-一次调用，两类标签" title="5.1 一次调用，两类标签">5.1 一次调用，两类标签</a></li>
+<li class="l3"><a href="#52-默认不采纳-不修改" title="5.2 默认不采纳 = 不修改">5.2 默认不采纳 = 不修改</a></li>
+<li class="l3"><a href="#53-页面与交互" title="5.3 页面与交互">5.3 页面与交互</a></li>
+<li class="l3"><a href="#54-改动清单与自测" title="5.4 改动清单与自测">5.4 改动清单与自测</a></li>
+<li class="l2"><a href="#6-c-线-·-在线-tts-朗读合成" title="6. C 线 · 在线 TTS 朗读合成">6. C 线 · 在线 TTS 朗读合成</a></li>
+<li class="l3"><a href="#61-情感推断-instructions-两级拼装（按拍板升级）" title="6.1 情感推断 + instructions 两级拼装（按拍板升级）">6.1 情感推断 + instructions 两级拼装（按拍板升级）</a></li>
+<li class="l3"><a href="#62-分块合成与无缝拼接" title="6.2 分块合成与无缝拼接">6.2 分块合成与无缝拼接</a></li>
+<li class="l3"><a href="#63-产物落盘与伺服" title="6.3 产物落盘与伺服">6.3 产物落盘与伺服</a></li>
+<li class="l3"><a href="#64-后台任务与进度" title="6.4 后台任务与进度">6.4 后台任务与进度</a></li>
+<li class="l3"><a href="#65-失败与降级" title="6.5 失败与降级">6.5 失败与降级</a></li>
+<li class="l3"><a href="#66-改动清单与自测" title="6.6 改动清单与自测">6.6 改动清单与自测</a></li>
+<li class="l2"><a href="#7-配置、成本与闸门" title="7. 配置、成本与闸门">7. 配置、成本与闸门</a></li>
+<li class="l3"><a href="#71-新增环境变量（env_groups-31-47-项，设置页自动列举）" title="7.1 新增环境变量（ENV_GROUPS 31 → 47 项，设置页自动列举）">7.1 新增环境变量（ENV_GROUPS 31 → 47 项，设置页自动列举）</a></li>
+<li class="l3"><a href="#72-量级估算" title="7.2 量级估算">7.2 量级估算</a></li>
+<li class="l3"><a href="#73-朗读合成的可行性闸门" title="7.3 朗读合成的可行性闸门">7.3 朗读合成的可行性闸门</a></li>
+<li class="l3"><a href="#74-磁盘影响" title="7.4 磁盘影响">7.4 磁盘影响</a></li>
+<li class="l3"><a href="#75-修订调用的实测口径（耗时与-token）" title="7.5 修订调用的实测口径（耗时与 token）">7.5 修订调用的实测口径（耗时与 token）</a></li>
+<li class="l2"><a href="#8-实施顺序、工作量与验收" title="8. 实施顺序、工作量与验收">8. 实施顺序、工作量与验收</a></li>
+<li class="l2"><a href="#9-d-线-·-声音复刻（学生本人音色）" title="9. D 线 · 声音复刻（学生本人音色）">9. D 线 · 声音复刻（学生本人音色）</a></li>
+<li class="l3"><a href="#91-为什么要做，以及它的边界" title="9.1 为什么要做，以及它的边界">9.1 为什么要做，以及它的边界</a></li>
+<li class="l3"><a href="#92-授权与留痕" title="9.2 授权与留痕">9.2 授权与留痕</a></li>
+<li class="l3"><a href="#93-样本只能从本段视频里挑" title="9.3 样本只能从本段视频里挑">9.3 样本只能从本段视频里挑</a></li>
+<li class="l3"><a href="#94-建音色：账号级一个音色，进度借用视频轮询" title="9.4 建音色：账号级一个音色，进度借用视频轮询">9.4 建音色：账号级一个音色，进度借用视频轮询</a></li>
+<li class="l3"><a href="#95-与-c-线接合：选我的音色时的四条硬规则" title="9.5 与 C 线接合：选「我的音色」时的四条硬规则">9.5 与 C 线接合：选「我的音色」时的四条硬规则</a></li>
+<li class="l3"><a href="#96-三条路由与闸门差异" title="9.6 三条路由与闸门差异">9.6 三条路由与闸门差异</a></li>
+<li class="l3"><a href="#97-关闭与降级行为" title="9.7 关闭与降级行为">9.7 关闭与降级行为</a></li>
+<li class="l3"><a href="#98-改动清单与自测" title="9.8 改动清单与自测">9.8 改动清单与自测</a></li>
+<li class="l2"><a href="#10-明确不做的事" title="10. 明确不做的事">10. 明确不做的事</a></li>
+<li class="l2"><a href="#11-风险与待确认" title="11. 风险与待确认">11. 风险与待确认</a></li>
+</ul></div>
+  </nav>
+  <main><article>
+    <p class="kicker">源文件 <code>docs/方案-文字稿纠错与朗读合成.md</code> · 生成于 2026-09-29 14:49</p>
+<h1 id="演讲视频评价系统-·-文字稿纠错与朗读合成方案">演讲视频评价系统 · 文字稿纠错与朗读合成方案</h1>
+<h2 id="1-结论先行">1. 结论先行</h2>
+<h3 id="11-先回答那个问题：这三件事都没做过">1.1 先回答那个问题：这三件事都没做过</h3>
+<p>「纠错 + 小范围改稿 + 学生确认 + 在线 TTS」这条链路，当前代码库里<strong>一个字节都没有</strong>。三条独立证据：</p>
+<table>
+<thead>
+<tr>
+<th>取证方式</th>
+<th>结果</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>全仓检索 <code>TTS</code> / <code>tts</code> / <code>语音合成</code> / <code>合成音频</code> / <code>text_to_speech</code></td>
+<td><strong>零命中</strong>（0 个文件）</td>
+<td>没有任何朗读合成的代码、配置、文档</td>
+</tr>
+<tr>
+<td><code>app/qwen.py</code> 全文（506 行）通读</td>
+<td>只有 <code>chat</code> / <code>chat_content</code> / <code>vision</code> / <code>audio</code> / <code>asr</code> 五个方法，全部打 <code>POST {base_url}/chat/completions</code></td>
+<td>连一条音频合成端点都没有封装，不存在"半成品"</td>
+</tr>
+<tr>
+<td><code>app/db.py</code> 的 <code>videos</code> 表定义 + <code>_EXTRA_VIDEO_COLUMNS</code></td>
+<td>有 <code>transcript</code> / <code>segments</code> / <code>engine</code> / <code>model</code>，<strong>无任何改稿、确认状态、合成产物列</strong></td>
+<td>数据模型层面从没为"回写"预留过位置</td>
+</tr>
+</tbody>
+</table>
+<p>补充两条：<code>docs/设计报告.md</code> 检索「朗读 / TTS / 改稿 / 润色 / 学生确认」无相关规划；<code>templates/report.html</code> 只有<strong>视频回放</strong>（<code>/videos/{id}/play</code>），系统能让学生"听见自己"，但从未产生过任何音频文件。</p>
+<p>所以这不是"做了但没做好"，而是<strong>从零开一条新链路</strong>。好消息是它的所有支撑件（后台任务、进度、并发闸、token 记账、资产伺服、可编辑提示词、设置页自列举）都已经在了，新增部分是"填空"而不是"打地基"。</p>
+<h3 id="12-三条硬结论">1.2 三条硬结论</h3>
+<p><strong>结论一：给 transcript 开写路径，必须先立一条不可违反的规矩——原稿永不覆盖。</strong></p>
+<p><code>transcript</code> 现在是<strong>评分的唯一文字依据</strong>（文本通道打分、<code>verify_quote</code> 证据核验、评语、导师出题全都读它），也被 <code>check_timing</code> 的口径间接锚定。一旦允许就地改写，"AI 给这份演讲打的 78 分"和"学生确认过的那份稿子"就会互相污染：改完再评分，分数会变；不重评分，页面上的 quote 就可能在稿子里找不到。</p>
+<p>设计上把两者物理分开：<code>transcript</code> 只读不改，新增 <code>script_text</code> 存"采纳后的成稿"，<code>script_items</code> 存每一条改动与其采纳状态。评分永远指向 <code>transcript</code>，朗读永远指向 <code>script_text</code>（为空则回退 <code>transcript</code>）。这条规矩同时天然实现了"不认可则不修改"——不采纳的条目根本不进入成稿。</p>
+<p><strong>结论二：TTS 不能复用现有模型通道，必须新增一条原生 DashScope 端点，但并发闸与记账可以直接搬。</strong></p>
+<p>现有 <code>qwen.py</code> 走的是 <strong>OpenAI 兼容模式</strong>（<code>https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions</code>）。语音合成不在兼容模式上：Qwen-TTS 走原生 <code>multimodal-generation</code>，CosyVoice 走独立 <code>SpeechSynthesizer</code>。所以要新增一个 <code>QwenClient.tts()</code>（或独立 <code>app/tts.py</code> 自带 HTTP 客户端），复用 <code>GATE.slot()</code>（限并发）、<code>_track()</code>（记账，但按 <strong>characters</strong> 而非 tokens）、<code>_try_models()</code>（同族降级）。另外兼容模式返回 <code>audio.url</code> <strong>只有 24 小时有效期</strong>，服务端必须立即下载落盘，绝不把该 URL 透给浏览器。</p>
+<p><strong>结论三：「语速和情感符合演讲现场及主题」这一条，只有 <code>qwen3-tts-instruct-flash</code> 能一步做到；数值化精确语速要换通道，而那个通道有地域前提。</strong></p>
+<p>自然语言指令（"课堂答辩场景，语速沉稳每分钟约 130 词，句与句之间留呼吸，情绪自信但克制"）这个能力，官方只在 <strong>Instruct 系列</strong>上开：<code>input.instructions</code>（≤1600 Token，仅中英）+ <code>optimize_instructions</code>。数值化的 <code>rate/pitch/volume</code>（0.5~2.0/0.5~2.0/0~100）与 SSML、情感标签在 <strong>CosyVoice / Qwen-Audio-TTS</strong> 一侧，但新版非实时接口要求 <strong>华北2（北京）+ workspace 专属域名</strong>，无法从现有 <code>base_url</code> 推导。</p>
+<p>这构成整个方案唯一真正的外部依赖风险：<strong>客户的 API Key 属于哪个地域、开通没开通 Instruct 模型，决定 C 线走哪条通道</strong>。§11 把它列为实施前必须先跑的一次验证调用。</p>
+<h3 id="13-需要拍板的四个决策点">1.3 需要拍板的四个决策点</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>决策点</th>
+<th>选项</th>
+<th>推荐</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td>纠错/改写的输出形态</td>
+<td>A：让模型返回整篇改后稿<br>B：只返回 diff 条目（原句/改句/类型/理由）</td>
+<td><strong>B</strong></td>
+<td>整稿返回时无法判断模型偷偷改了什么，"小范围修改"无从约束，也无法逐条确认；diff 可做长度/数字/命中等硬校验，并能直接渲染成确认 UI</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>何时生成修订建议</td>
+<td>A：分析流水线里自动跑<br>B：报告页点按钮按需生成</td>
+<td><strong>B</strong></td>
+<td>每份稿子多一次 LLM 调用与等待（初版按 5~10 秒估，<strong>实测 1600 字稿子要 349 秒</strong>，见 §7.5），但多数学生只看分数；按需生成把成本和时延交给用户，失败也不污染主流程（与"导师提问"同一范式，已验证）</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>TTS 通道</td>
+<td>A：<code>qwen3-tts-instruct-flash</code>（自然语言指令）<br>B：CosyVoice v3.5/v2（数值 rate/pitch + SSML）</td>
+<td><strong>A 为主，B 为备</strong></td>
+<td>要求里"符合演讲现场及主题"本质是语义化诉求，A 一句 instructions 覆盖语速/情绪/正式度；B 精确但受北京地域与 workspace 端点限制。A 不可用时用 <code>TTS_MODEL</code> 切 B</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>确认 UI 落点</td>
+<td>A：新建 <code>/videos/{id}/script</code> 页<br>B：就地加进 <code>report.html</code> 一节</td>
+<td><strong>B</strong></td>
+<td>学生动线是"看分→看稿→听朗读"，同页闭环；新页要多一条路由、导航与权限判断，收益不大</td>
+</tr>
+</tbody>
+</table>
+<p>一句话方案：<strong>A 线产出可校验的 diff，B 线把 diff 变成"默认不生效"的确认门，C 线用 Instruct TTS 把成稿读成一段贴合主题与现场的音频。</strong></p>
+<hr />
+<h2 id="2-现状调研">2. 现状调研</h2>
+<h3 id="21-转写链路有什么">2.1 转写链路有什么</h3>
+<p><code>app/transcribe.py</code>（151 行）：</p>
+<div class="codeline"><div class="bar"><span class="chip">python</span><button type="button" class="btn cp-btn" data-target="code-1">复制代码</button></div><div class="codeslot" id="code-1"><div class="codehilite"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span> <span class="nc">TranscriptResult</span><span class="p">:</span>
+    <span class="n">text</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">segments</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">engine</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">;</span> <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">warnings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">credible</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+</pre></div></div></div>
+<ul>
+<li><code>credibility()</code> 用三条判据（tokens&lt;8、字母/词比&lt;1.8、长音频词密度&lt;0.4 词/秒）识别 ASR 幻觉，不可信时 <code>credible=False</code>；</li>
+<li><code>_split_wav(chunk=175.0, ≤24 块)</code> 把音频切块喂 <code>qwen3-asr-flash</code>，每块产出 <code>{"start","ts","text","chars"}</code>；</li>
+<li>也就是说：<strong>我们手里不只是一坨纯文本，而是带时间戳的分段数组</strong>。这对 C 线的"按句分块合成"和 A 线的"定位到时间点"都是现成的抓手。</li>
+</ul>
+<h3 id="22-transcript-在下游只被读，从不被写">2.2 transcript 在下游只被"读"，从不被"写"</h3>
+<p><code>run_analysis</code>（<code>app/pipeline.py</code> L150-288）的实际顺序：压缩 → probe → 抽音频/抽帧/正脸率 → <code>transcribe</code>(进度22) → <code>check_timing</code> → 三通道评审(45→80) → <code>aggregate</code>(84) → <code>build_narrative</code>(91) → <code>build_report</code> → <code>save_evaluation</code> + <code>update_video(transcript=…, segments=…)</code>(97) → <code>build_questions</code>(99) → 完成(100)。</p>
+<p>下游消费点：文本通道评分、<code>verify_quote</code> 证据核验、评语叙述、导师出题（<code>/qa/generate</code> 传 <code>video["transcript"]</code>）。<strong>没有任何一处把文字写回 <code>transcript</code></strong>（除分析时那一次 ASR 落库）。这是"改稿"功能从未存在的结构性证据，也是 §1.2 结论一的由来。</p>
+<h3 id="23-模型调用抽象只有一个端点">2.3 模型调用抽象只有一个端点</h3>
+<p><code>app/qwen.py</code> 关键件：<code>GATE = RequestGate()</code>（<code>BoundedSemaphore(max_llm_requests)</code>，等待超 <code>timeout*3</code> 报错）、<code>FALLBACKS = {chat, vision, audio, asr}</code> + <code>_try_models()</code> + <code>_RESOLVED</code> 进程内记忆、<code>is_model_error()</code>、<code>_track()/usage_summary()</code>（无 usage 时按 <code>estimate_tokens</code> 估：CJK 1 字 1 token、其余 4 字符 1 token）、<code>data_url()</code>（base64 内联）、<code>asr()</code>（<code>asr_options:{language, enable_itn:False}</code>）。</p>
+<p>所有请求都拼 <code>self.base_url + "/chat/completions"</code>，而 <code>DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"</code>。原生端点同 host 不同 path（<code>/api/v1/...</code>），所以 <code>QwenClient</code> 里加一个 <code>_native_url(path)</code>：从 <code>base_url</code> 去掉 <code>/compatible-mode/v1</code> 得到 host 再拼，客户如果自定义了网关也只需改一处。</p>
+<h3 id="24-可以直接复用的现成件">2.4 可以直接复用的现成件</h3>
+<table>
+<thead>
+<tr>
+<th>现成件</th>
+<th>位置</th>
+<th>在本方案里怎么用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /videos/{id}/qa/generate</code> 范式</td>
+<td><code>app/main.py</code> L348-371</td>
+<td>状态门（<code>status != "done"</code> 直接回执）→ <code>QwenClient().mark("阶段名")</code> → <code>try/finally: db.add_usage(...)</code> → <code>_xx_redirect(msg)</code>。C 线的"生成修订建议"照抄</td>
+</tr>
+<tr>
+<td><code>POST /videos/{id}/qa/answer</code> 范式</td>
+<td>L374-397</td>
+<td><code>await request.form()</code> → 逐条读 <code>form.get(f"answer_{idx}")</code> → 落库 → 带 msg 重定向。B 线的"逐条采纳/驳回"照抄</td>
+</tr>
+<tr>
+<td>资产伺服路由</td>
+<td><code>GET /videos/{id}/asset/{name:path}</code> L442-450</td>
+<td>合成音频放 <code>settings.artifact_dir/{id}/tts/…mp3</code>，浏览器用 Range 拖动进度条（<code>_stream</code> 已支持 206）。只需扩 <code>ASSET_RE</code> 与 mime</td>
+</tr>
+<tr>
+<td><code>_EXTRA_VIDEO_COLUMNS</code> 迁移钩子</td>
+<td><code>app/db.py</code> L135-147</td>
+<td>加列即用，老库自动 <code>ALTER TABLE</code>，无需手工迁移脚本</td>
+</tr>
+<tr>
+<td><code>EnvField</code> + <code>ENV_GROUPS</code></td>
+<td><code>app/config.py</code> L151 起</td>
+<td>新增配置项自动出现在 <code>/settings</code> 并支持四态取值（.env / 环境变量 / api_key.txt / 内置默认）。当前 31 项</td>
+</tr>
+<tr>
+<td><code>PromptField</code> + <code>PROMPT_GROUPS</code></td>
+<td><code>app/prompts.py</code> L36 起</td>
+<td>新增提示词块自动出现在 <code>/settings</code> 提示词区，<code>strict_braces</code> + <code>tokens</code> 校验防改坏。改稿模板、instructions 模板都走这里，教师可自行调</td>
+</tr>
+<tr>
+<td>压缩可行性闸门</td>
+<td><code>app/compress.py</code> <code>feasibility()</code></td>
+<td>"装不下就开压前失败、绝不自动放宽目标"的口径，直接搬到"稿子太长就不合成"</td>
+</tr>
+<tr>
+<td>后台线程池 + 进度</td>
+<td><code>pipeline.enqueue/_worker/_active/is_running</code> + <code>set_progress</code></td>
+<td>C 线要 10~60 秒，不能同步占请求；复用池与 <code>_active</code> 单视频互斥</td>
+</tr>
+<tr>
+<td>版本指纹</td>
+<td><code>app/buildinfo.py</code> + <code>BUILD_INFO.json</code></td>
+<td>新包上线后用 <code>/health</code> 指纹确认线上确实带 TTS 代码</td>
+</tr>
+</tbody>
+</table>
+<h3 id="25-缺口清单">2.5 缺口清单</h3>
+<ol>
+<li>无写回路径与状态模型（列、校验、UI 全无）→ A/B 线；</li>
+<li>无 TTS 客户端与音频拼接（<code>media.py</code> 只有 <code>probe / extract_audio / extract_frames_timed / video_thumbnail</code>，<strong>没有 concat</strong>）→ C 线；</li>
+<li><code>ASSET_RE = ^(?:cover\.jpg|audio\.wav|frames/frame_\d{1,3}\.jpg)$</code> 白名单不含 mp3，<code>_stream</code> 只判 <code>wav/jpeg</code> → C 线要改两处；</li>
+<li>无"演讲真实语速"数据：<code>check_timing(duration, topic, requirements)</code> 不统计词速，<code>_WORD_RE</code> 只在 <code>credibility()</code> 内部用 → instructions 校准要新增一个小函数；</li>
+<li>无 per-item 决策存储（<code>qa_turns</code> 的"一问一答"形态不适合 diff 条目）→ 用 <code>script_items</code> JSON 承载。</li>
+</ol>
+<hr />
+<h2 id="3-百炼-tts-能力盘点（选型依据）">3. 百炼 TTS 能力盘点（选型依据）</h2>
+<h3 id="31-三条候选通道">3.1 三条候选通道</h3>
+<table>
+<thead>
+<tr>
+<th>通道</th>
+<th>端点形态</th>
+<th>表现力控制</th>
+<th>单次文本上限</th>
+<th>返回</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Qwen-TTS</strong>（<code>qwen3-tts-flash</code> / <strong><code>qwen3-tts-instruct-flash</code></strong>）</td>
+<td>原生 <code>multimodal-generation/generation</code>，<code>input{text, voice, language_type, instructions, optimize_instructions}</code></td>
+<td><strong>自然语言 instructions</strong>（≤1600 Token，仅中英，<strong>Instruct 系列独有</strong>）+ 语义增强开关</td>
+<td><strong>512 Token</strong>（其他模型 600 字符）</td>
+<td><code>output.audio.url</code>（<strong>24h</strong>）/ <code>audio.data</code>，<code>usage.characters</code></td>
+</tr>
+<tr>
+<td><strong>Qwen-Audio-TTS / CosyVoice 非实时</strong>（<code>qwen-audio-3.0-tts-plus</code>、<code>cosyvoice-v3.5-plus/flash</code>、<code>v2</code> 等）</td>
+<td>独立 <code>POST …/api/v1/services/audio/tts/SpeechSynthesizer</code>，<strong>新版要求 <code>{WorkspaceId}.cn-beijing.maas.aliyuncs.com</code>（仅华北2）</strong></td>
+<td>数值 <code>rate 0.5~2.0</code> / <code>pitch 0.5~2.0</code> / <code>volume 0~100</code>、<code>enable_ssml</code>、<code>instruction</code>、<code>hot_fix</code>、<code>seed</code>、<code>word_timestamp_enabled</code>；<strong>情感与富语言标签仅 <code>qwen-audio-3.0-tts</code> 系列</strong></td>
+<td>长文本流式友好，<code>X-DashScope-SSE: enable</code></td>
+<td>音频（<code>format mp3/wav/pcm/opus</code>，默认 22050，最高 48kHz）</td>
+</tr>
+<tr>
+<td>声音设计（Voice Design）</td>
+<td><code>voice_prompt</code> + <code>preview_text</code> 文本描述造音色</td>
+<td>定制音色（CosyVoice v3.5/v3 仅北京；<code>qwen3-tts-vd-*</code> 北京+新加坡）</td>
+<td>—</td>
+<td>音色 id</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-四条硬约束">3.2 四条硬约束</h3>
+<ol>
+<li><strong>512 Token/次</strong>：6 分钟英语演讲约 4500 字符，一次调用绝对装不下 → 必须分块合成再拼接（§6.2）。这是 C 线最大的工程复杂度来源。</li>
+<li><strong>URL 24 小时过期</strong>：必须服务端下载落盘为本地资产，否则第二天学生点开就是 404；signed URL 外泄也不合规。</li>
+<li><strong>地域与开通</strong>：CosyVoice 新链路绑定北京 workspace；Instruct 模型是否对客户 key 可见需实测 → §11 的验证前置步骤。</li>
+<li><strong>按字符计费</strong>：<code>usage.characters</code>，与现有 token 记账不同口径 → <code>_track()</code> 需要一个 characters 变体，<code>/settings</code> 的用量表要能显示"合成 N 字符"。</li>
+</ol>
+<h3 id="33-选型结论与降级链">3.3 选型结论与降级链</h3>
+<p>主选 <code>qwen3-tts-instruct-flash</code>（唯一能用一句话描述"演讲现场 + 主题 + 情绪"的通道）；<code>FALLBACKS["tts"] = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]</code>，同族降级后只是丢掉 instructions、保留朗读；若 key 不通过，管理员把 <code>TTS_MODEL</code> 切成 CosyVoice 并填 <code>TTS_ENDPOINT</code>（新增一项，默认空=从 <code>base_url</code> 推导 host）。这条降级链保证"通道 A 不可用"不变成代码返工。</p>
+<h3 id="34-步骤-0-通道实测记录（已完成）">3.4 步骤 0 通道实测记录（已完成）</h3>
+<p>用生产同款内地百炼 key（即设置页解析的 <code>api_key.txt</code>）对 <code>qwen3-tts-instruct-flash</code> 发起 3 次真实非流式调用，全部 HTTP 200，样例为 67 词英语演讲稿（<code>voice=Cherry</code>，<code>language_type=English</code>）：</p>
+<table>
+<thead>
+<tr>
+<th>对照组</th>
+<th>参数</th>
+<th>API 往返</th>
+<th><code>usage</code></th>
+<th>返回产物</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>不带 instructions</td>
+<td>8.4 秒</td>
+<td><code>characters=367</code></td>
+<td>wav ≈ 1.40 MB（约 29 秒）</td>
+</tr>
+<tr>
+<td>B</td>
+<td>instructions + <code>optimize_instructions=true</code></td>
+<td>11.9 秒</td>
+<td><code>characters=367</code></td>
+<td>wav ≈ 1.39 MB（约 29 秒）</td>
+</tr>
+<tr>
+<td>C</td>
+<td>仅 instructions</td>
+<td>7.6 秒</td>
+<td><code>characters=367</code></td>
+<td>wav ≈ 1.27 MB（约 26.5 秒）</td>
+</tr>
+</tbody>
+</table>
+<p>实测确认的落地事实：</p>
+<ol>
+<li><strong>端点推导成立</strong>：<code>https://dashscope.aliyuncs.com/compatible-mode/v1</code> 去掉 <code>/compatible-mode/v1</code> 拼 <code>/api/v1/services/aigc/multimodal-generation/generation</code>，即 <code>_native_url()</code> 的实现口径；</li>
+<li><strong>返回字段与文档一致</strong>：<code>output.audio{url, data, id, expires_at}</code>、<code>finish_reason="stop"</code>；非流式下 <code>data</code> 为<strong>空串</strong>、音频只在 <code>url</code> 里；<code>output.text</code> / <code>output.choices</code> 恒为 <code>null</code>，代码可忽略——K3 消解，<code>tts()</code> 仍按"url 优先、data 回退"双兼容写；</li>
+<li><strong>记账口径</strong>：<code>usage</code> 只有 <code>characters</code>（367），无 <code>input_tokens/output_tokens</code> → <code>track_characters()</code> 是唯一正解；</li>
+<li><strong><code>voice="Cherry"</code> 在非实时 Instruct-Flash 上实测可用</strong>（官方文档快速开始即用该音色），<code>TTS_VOICE</code> 默认值据此填 <code>Cherry</code>，其余音色实现期按需扩验；</li>
+<li><strong>注意 url 是 <code>http://</code> 的 OSS 北京域名</strong>：服务端下载须容忍 http 明文，且<strong>绝不把 url 透传给前端</strong>（24h 过期 + 非 https 混合内容）——<code>asset</code> 路由走本地落盘文件的既有设计不变；</li>
+<li><strong>产物规格</strong>：<code>audio/x-wav</code>，按体积推算为 24 kHz / 16 bit / 单声道（≈ 48 KB/秒）→ §6.4 <code>concat_audio()</code> 统一重编码 mp3 的计划不变；</li>
+<li><strong>instructions 确实改变输出</strong>：C 组比 A 组短约 9%（语速/停顿不同），B 组时长接近 A 但往返更久（语义增强多一步处理）；语速与情感是否达到"课堂示范"水准需人耳验收（样音已存 <code>dist/tts-probe/</code>，文件名见 §8 步骤 0 行）。</li>
+</ol>
+<p><strong>补充实测（按用户拍板：采用 B 模式 + 男声新闻腔 + 情感跟主题走）</strong>：用 <code>voice=Neil</code>（阿闻，字正腔圆新闻主持人）跑三组中文演讲样例，全部 HTTP 200：</p>
+<table>
+<thead>
+<tr>
+<th>组</th>
+<th>样例</th>
+<th>参数</th>
+<th>API 往返</th>
+<th>产物（约）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D</td>
+<td>主题《在奋斗中绽放青春》</td>
+<td>无 instructions（基线）</td>
+<td>10.9 秒</td>
+<td>41 秒 wav（319 字符计费）</td>
+</tr>
+<tr>
+<td>E</td>
+<td>同上</td>
+<td>instructions（沉稳→激昂推进、结尾放慢加重）+ <code>optimize_instructions=true</code></td>
+<td>13.3 秒</td>
+<td>37 秒 wav</td>
+</tr>
+<tr>
+<td>F</td>
+<td>主题《造纸术的发明与传播》</td>
+<td>instructions（沉稳理性、讲述感、克制内敛）+ 语义增强</td>
+<td>11.8 秒</td>
+<td>34 秒 wav</td>
+</tr>
+</tbody>
+</table>
+<p>两个落地修正：
+1. <strong>同音色、不同主题指令，产出的时长/节奏确实分化</strong>（E 与 F 对同一基线做了不同方向的压缩），"主题→情感→调音"路线成立，据此把 §6.1 升级为"情感推断两级拼装"；
+2. <strong>绝对数值语速指令收效率低</strong>：E 组要求"约每分钟 220 字"，实测约 270+ 字/分钟——<code>instructions</code> 里写"每分钟 N 字/词"只能当弱参考，<strong>语速控制要靠相对词</strong>（"从容放慢""层层推进""结尾明显放慢"）；<code>speech_rate()</code> 算出的 wpm 改用于<strong>选相对档</strong>（比学生原速慢一档/快一档/同档），不再把数值直接塞进指令（K6 据此修订）。</p>
+<p>模式定型：<code>optimize_instructions=true</code> 常开（即用户拍板的 B 模式），由配置 <code>TTS_INSTRUCTIONS=1</code> 映射，填 0 可关。</p>
+<p><strong>复测（用户人耳反馈：E 方向可以，"还要再抑扬顿挫一点"）</strong>：同一份 243 字《在奋斗中绽放青春》稿、Neil + 语义增强，只加码节奏指令，两组均 HTTP 200：</p>
+<table>
+<thead>
+<tr>
+<th>组</th>
+<th>指令策略</th>
+<th>API 往返</th>
+<th><code>usage</code></th>
+<th>产物</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>G</td>
+<td>抽象节奏描述：抑扬顿挫鲜明可感、关键词饱满有力、句末上扬收束干脆、结尾一字一顿放慢</td>
+<td>15.6 秒</td>
+<td><code>characters=459</code></td>
+<td>47.6 秒 wav</td>
+</tr>
+<tr>
+<td>H</td>
+<td>逐句演绎脚本：设问后停顿、斩钉截铁、排比递进、情绪顶点延长</td>
+<td>16.3 秒</td>
+<td><code>characters=459</code></td>
+<td>49.7 秒 wav</td>
+</tr>
+</tbody>
+</table>
+<p>两条新发现：</p>
+<ul>
+<li><strong>相对节奏描述能有效放缓节奏</strong>：同样 243 字正文，G/H 约 4.9~5.1 字/秒，而 E 组（319 字 / 37 秒）约 8.6 字/秒——"抑扬顿挫鲜明""结尾一字一顿"这类相对词把时长拉长了近一倍节奏，再次佐证第 2 条修正（只写相对档，别写绝对数值）；</li>
+<li><strong>instructions 计入 <code>characters</code> 计费</strong>：正文 243 字却计 459 字符，即计费 ≈ 正文 + 展开后的指令文本（G/H 两条长度不同的指令最终同计 459，疑为语义增强展开后归一）。这对成本口径有两个含义：页面"本次字符数"必须按 <code>usage</code> 返回值显示而非正文字数；分块合成时<strong>每一块都要带上同一段指令</strong>，指令开销按块数累积，指令模板宜控制在百字量级（K7 据此补充）。</li>
+</ul>
+<p><strong>验收结论（用户人耳定论）</strong>：选定 <strong>H（逐句演绎脚本）</strong>——"设问后停顿、斩钉截铁、排比递进、情绪顶点延长"这类<strong>逐句点节奏</strong>的写法抑扬顿挫最好，定为 §6.1 第二级 <code>structure</code> 字段的拼装模板基底；G 的抽象节奏描述作为降级兜底文案。</p>
+<hr />
+<h2 id="4-a-线-·-文字稿纠错">4. A 线 · 文字稿纠错</h2>
+<h3 id="41-数据流">4.1 数据流</h3>
+<figure class="mmd"><div class="bar"><span class="chip">mermaid 流程图</span><span class="state" data-state="wait">等待渲染…</span><button type="button" class="btn mmd-btn" data-target="mmd-1">取 mermaid 源码</button><button type="button" class="btn cp-btn" data-target="mmd-1">复制源码</button><button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button><button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button><button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div><div class="stage" id="stage-1"><pre class="pending">flowchart TD
+  A[&quot;transcript + segments&lt;br/&gt;（只读）&quot;] --&gt; B[&quot;prompt 渲染&lt;br/&gt;主题 / 老师要求 / 术语提示&quot;]
+  B --&gt; C[&quot;chat 模型输出 JSON&quot;]
+  C --&gt; D[&quot;解析 items 列表&quot;]
+  D --&gt; E[&quot;五条红线校验通过?&quot;]
+  E -- 是 --&gt; F[&quot;decision = pending&lt;br/&gt;等待学生采纳&quot;]
+  E -- 否 --&gt; G[&quot;丢弃并在 dropped 留痕&quot;]
+  F --&gt; H[&quot;写 script_items&lt;br/&gt;状态置 proposed&quot;]
+  H --&gt; I[&quot;报告页逐条确认&lt;br/&gt;只有显式采纳才改稿&quot;]
+  G --&gt; I</pre></div><pre class="mmdsrc" id="mmd-1" hidden>flowchart TD
+  A[&quot;transcript + segments&lt;br/&gt;（只读）&quot;] --&gt; B[&quot;prompt 渲染&lt;br/&gt;主题 / 老师要求 / 术语提示&quot;]
+  B --&gt; C[&quot;chat 模型输出 JSON&quot;]
+  C --&gt; D[&quot;解析 items 列表&quot;]
+  D --&gt; E[&quot;五条红线校验通过?&quot;]
+  E -- 是 --&gt; F[&quot;decision = pending&lt;br/&gt;等待学生采纳&quot;]
+  E -- 否 --&gt; G[&quot;丢弃并在 dropped 留痕&quot;]
+  F --&gt; H[&quot;写 script_items&lt;br/&gt;状态置 proposed&quot;]
+  H --&gt; I[&quot;报告页逐条确认&lt;br/&gt;只有显式采纳才改稿&quot;]
+  G --&gt; I</pre></figure>
+<p>新增 <code>app/revise.py</code>，纯函数优先（便于自测，和 <code>compress.pick_plan</code> 同一套打法）：</p>
+<div class="codeline"><div class="bar"><span class="chip">python</span><button type="button" class="btn cp-btn" data-target="code-2">复制代码</button></div><div class="codeslot" id="code-2"><div class="codehilite"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span> <span class="nc">RevisionItem</span><span class="p">:</span>
+    <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">before</span><span class="p">:</span> <span class="nb">str</span>          <span class="c1"># 必须能在原稿中唯一定位</span>
+    <span class="n">after</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span>            <span class="c1"># homophone | term | grammar | filler | style</span>
+    <span class="n">reason</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">decision</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;pending&quot;</span>   <span class="c1"># pending | accepted | rejected</span>
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span> <span class="nc">RevisionResult</span><span class="p">:</span>
+    <span class="n">items</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">RevisionItem</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">dropped</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">warnings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+</pre></div></div></div>
+<h3 id="42-只收-diff，不收整稿">4.2 只收 diff，不收整稿</h3>
+<p>模型只被允许返回 items；<strong>成稿由代码用精确字符串替换生成</strong>（<code>apply_revisions(text, items)</code>）：</p>
+<ul>
+<li><code>before</code> 在原文中出现 0 次 → 丢弃并记 <code>unmatched</code>（模型幻觉出的句子）；</li>
+<li>出现多次且未给位置 → 丢弃（不敢猜）；</li>
+<li>命中后按顺序替换，并做<strong>区间重叠检测</strong>（两条改动不能改同一段字符，后到的丢弃）。</li>
+</ul>
+<p>这样"改了什么"永远是可枚举、可展示、可回滚的，而不是"两篇稿子自己比"。</p>
+<h3 id="43-五条改幅红线">4.3 五条改幅红线</h3>
+<p>对应要求里的<strong>"小范围修改"</strong>——不靠 prompt 里恳求，靠代码硬卡，越界条目直接丢：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>红线</th>
+<th>判据（实现）</th>
+<th>越界处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td>单条改动幅度</td>
+<td><code>\|len(after)-len(before)\| ≤ 20</code> 字符</td>
+<td>丢弃 + <code>dropped</code> 记原因</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>全篇改幅上限</td>
+<td><code>Σ|after|-|before| ≤ 原文 8%</code>（<code>REVISE_MAX_CHANGE_RATIO</code>）</td>
+<td>超线后停止采纳后续条目</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>数字/时间守恒</td>
+<td><code>before</code> 中的数字序列必须与 <code>after</code> 完全一致</td>
+<td>丢弃（防止把"30%提升"改成"50%"= 改事实）</td>
+</tr>
+<tr>
+<td>R4</td>
+<td>不新增句子</td>
+<td><code>after</code> 的句末标点数量 ≤ <code>before</code></td>
+<td>丢弃（禁止扩写、续写）</td>
+</tr>
+<tr>
+<td>R5</td>
+<td><code>style</code> 类条目配额</td>
+<td><code>kind=style</code> 最多 <code>REVISE_MAX_STYLE_ITEMS</code>（默认 5）条</td>
+<td>超额的 style 丢弃，其余 kind 不受影响</td>
+</tr>
+</tbody>
+</table>
+<p><code>kind</code> 的语义写进提示词（可编辑）：<code>homophone</code>（ASR 听错的同音/近音词）、<code>term</code>（术语与专名，参考学生填的术语提示）、<code>grammar</code>（明显语法口误的最小改动）、<code>filler</code>（口头禅与重复，<strong>仅为朗读流畅服务，默认不采纳</strong>）、<code>style</code>（结合主题的小幅润色，<strong>默认不采纳</strong>）。</p>
+<h3 id="44-评分口径不随之改变">4.4 评分口径不随之改变</h3>
+<ul>
+<li><code>check_timing</code> 与三通道评分继续用 <code>transcript</code>（评的是学生<strong>真实说出的话</strong>，不是改后稿）；</li>
+<li>页面明确标注："以下修订用于字幕与朗读，<strong>不影响得分</strong>"；</li>
+<li><code>verify_quote</code> 校验评分证据时，若 quote 只存在于修订稿则视为证据失效（防止"改稿—再评分"闭环造假）。</li>
+</ul>
+<h3 id="45-改动清单与自测">4.5 改动清单与自测</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/revise.py</code></td>
+<td>新增：<code>RevisionItem/Result</code>、<code>build_messages()</code>、<code>parse_items()</code>、<code>validate_items()</code>（R1~R5）、<code>apply_revisions()</code></td>
+<td>~200 行</td>
+</tr>
+<tr>
+<td><code>app/prompts.py</code></td>
+<td>新增分组「文字稿修订」：<code>revise_head</code>（tokens: topic/requirements/glossary/transcript）、<code>revise_tail</code>（tokens: kinds/schema，<code>strict_braces=True</code>）</td>
+<td>~50 行；设置页自动列举，零 UI 成本</td>
+</tr>
+<tr>
+<td><code>app/db.py</code></td>
+<td><code>_EXTRA_VIDEO_COLUMNS</code> + 4 列（见 §5.2）</td>
+<td>~10 行</td>
+</tr>
+<tr>
+<td><code>app/config.py</code></td>
+<td><code>REVISE_ENABLED / REVISE_MODEL / REVISE_MAX_CHANGE_RATIO / REVISE_MAX_STYLE_ITEMS</code> + <code>ENV_GROUPS</code></td>
+<td>~25 行</td>
+</tr>
+<tr>
+<td><code>tests/selfcheck</code></td>
+<td>新增 6 条：unmatched 丢弃、多命中丢弃、区间重叠、R3 数字守恒、R2 比例闸门、apply 结果幂等</td>
+<td>+6</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-b-线-·-结合主题的小改-学生确认门">5. B 线 · 结合主题的小改 + 学生确认门</h2>
+<h3 id="51-一次调用，两类标签">5.1 一次调用，两类标签</h3>
+<p>"纠错"（A 线）和"结合主题的小改"（本线）共用<strong>一次</strong> LLM 调用，靠 <code>kind</code> 区分——省一半时延与费用，且两类建议本来就需要同一个上下文（主题 + 老师要求 + 全稿）。区别只在<strong>默认勾选状态</strong>：</p>
+<ul>
+<li><code>homophone / term / grammar</code> → 归为「听写订正」，界面提示"建议采纳"；</li>
+<li><code>filler / style</code> → 归为「表达润色」，<strong>默认不勾选</strong>，学生主动点才生效。</li>
+</ul>
+<p>"结合主题"体现在 prompt：注入 <code>topic</code> + <code>requirements</code>，并要求 style 条目必须"与主题呼应、只调词不调意"，同时给 R5 配额硬约束。</p>
+<h3 id="52-默认不采纳-不修改">5.2 默认不采纳 = 不修改</h3>
+<p>新增 4 列（走 <code>_EXTRA_VIDEO_COLUMNS</code>，老库自动 ALTER）：</p>
+<table>
+<thead>
+<tr>
+<th>列</th>
+<th>声明</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>script_status</code></td>
+<td><code>TEXT NOT NULL DEFAULT ''</code></td>
+<td><code>''</code> 未生成 / <code>proposed</code> 有待确认建议 / <code>decided</code> 学生已处理</td>
+</tr>
+<tr>
+<td><code>script_items</code></td>
+<td><code>TEXT NOT NULL DEFAULT '[]'</code></td>
+<td>JSON 数组，每条含 <code>before/after/kind/reason/confidence/decision</code></td>
+</tr>
+<tr>
+<td><code>script_text</code></td>
+<td><code>TEXT NOT NULL DEFAULT ''</code></td>
+<td>采纳后的成稿；<strong>空串 = 完全等同原稿</strong></td>
+</tr>
+<tr>
+<td><code>script_meta</code></td>
+<td><code>TEXT NOT NULL DEFAULT '{}'</code></td>
+<td><code>{source_hash, model, glossary, dropped[], applied_count}</code>，<code>source_hash</code> 用于"重新分析后旧建议失效"判定</td>
+</tr>
+</tbody>
+</table>
+<p><strong>"如果他不认可则不修改"的三条实现保证</strong>：</p>
+<ol>
+<li><code>decision</code> 初值 <code>pending</code>，而 <code>pending</code> 在应用时<strong>等同于 rejected</strong>（只有显式 <code>accepted</code> 才进成稿）——不动鼠标 = 不改；</li>
+<li>页面上唯一的默认按钮是"保持原稿"，"全部采纳"必须多点一次；</li>
+<li>只要 <code>script_text == ''</code>，全链路（字幕、朗读、导出）读到的都是 <code>transcript</code> 原文；学生随时可点"撤销全部修订"把 <code>script_text</code> 清空、<code>script_items</code> 全部置 rejected，原稿因为从未被覆盖而 100% 可恢复。</li>
+</ol>
+<p><code>POST /videos/{id}/script/decide</code>（form 里 <code>accept_&lt;idx&gt;</code> 复选框 + <code>glossary</code> 文本域）落库时<strong>不调模型</strong>，纯本地 <code>apply_revisions()</code>，即时返回。</p>
+<h3 id="53-页面与交互">5.3 页面与交互</h3>
+<p>在 <code>report.html</code> 评分区之后加一节「文字稿与朗读」（<code>#script</code> + <code>#tts</code> 两个锚点）：</p>
+<ul>
+<li>顶部：原文/成稿切换视图 + 一句状态"已采纳 3 处 / 共 7 条建议"；</li>
+<li>主体表格：<code>类型徽标 | 原句片段 → 建议 | 理由 | ☐采纳 | 时间点</code>（时间点取自 <code>segments</code>，点击跳到视频对应位置听自己原来怎么说的——这是"证据"，不是装饰）；</li>
+<li>术语提示输入框（"把可能听错的人名/术语用逗号列出"）+「重新生成建议」（<code>POST /script/propose</code>，<strong>提交后台任务</strong>并回执"已提交生成"，页面靠 <code>GET /videos/{id}/status</code> 轮询进度；实测 1600 字稿子这一步要 349 秒，所以早期"同步等几秒"的做法必然被网关掐断）；</li>
+<li>底部：「保持原稿」/「采纳勾选项」/「撤销全部修订」；</li>
+<li>无 API Key（mock 模式）时：整节显示为"需在线模式"占位，不出错。</li>
+</ul>
+<h3 id="54-改动清单与自测">5.4 改动清单与自测</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/main.py</code></td>
+<td><code>POST /videos/{id}/script/propose</code>、<code>.../decide</code>、<code>.../reset</code>（路由 29 → 32）</td>
+<td>~70 行</td>
+</tr>
+<tr>
+<td><code>app/templates/report.html</code></td>
+<td>新增「文字稿与朗读」节（表格 + 复选框 + 播放器）</td>
+<td>~110 行模板</td>
+</tr>
+<tr>
+<td><code>app/pipeline.py</code></td>
+<td>导出 <code>run_revision(video_id, glossary)</code> 供路由调用（复用 client/usage 记账）</td>
+<td>~30 行</td>
+</tr>
+<tr>
+<td><code>tests/selfcheck</code></td>
+<td>新增 4 条：pending 等同不修改、decide 后可恢复原稿、<code>source_hash</code> 失配时建议失效、style 配额生效</td>
+<td>+4</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-c-线-·-在线-tts-朗读合成">6. C 线 · 在线 TTS 朗读合成</h2>
+<h3 id="61-情感推断-instructions-两级拼装（按拍板升级）">6.1 情感推断 + instructions 两级拼装（按拍板升级）</h3>
+<p>要求「语音语速以及情感符合演讲现场及主题」，且用户明确"<strong>根据演讲主题分析出情感，然后根据情感再来调</strong>"。据此把原"四源直接拼装"升级为<strong>两级</strong>：</p>
+<p><strong>第一级 · 主题情感推断</strong>（新增 1 次廉价 chat 调用，与 A 线修订调用同模型不同用途）：<code>tts_style</code> 模板（可编辑，<code>strict_braces=True</code>）输入 <code>topic + requirements + tts_scene + 成稿前 200 字</code>，输出 JSON：</p>
+<div class="codeline"><div class="bar"><span class="chip">json</span><button type="button" class="btn cp-btn" data-target="code-3">复制代码</button></div><div class="codeslot" id="code-3"><div class="codehilite"><pre><span></span><span class="p">{</span><span class="nt">&quot;tone&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;庄重而激昂&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pace_band&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;偏快但结尾放慢&quot;</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">&quot;structure&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;设问开场留白；排比层层推进；结尾放慢加重收束&quot;</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">&quot;avoid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;不喊叫、不煽情&quot;</span><span class="p">}</span>
+</pre></div></div></div>
+<p>约束：≤80 字、只描述演绎不评价内容、失败/超时<strong>降级为规则模板</strong>（按 scene 给中性新闻腔基线），绝不让推断失败阻塞合成。</p>
+<p><strong>第二级 · 拼装 instructions</strong>（纯字符串，无额外调用），四个来源合成一段（模板 <code>tts_instructions</code>，实际约 200 Token，上限 1600）：</p>
+<table>
+<thead>
+<tr>
+<th>来源</th>
+<th>具体取值</th>
+<th>对朗读的作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>情感基调</strong></td>
+<td>第一级输出的 <code>tone/structure/avoid</code>；<code>structure</code> 按 §3.4 验收选定的 <strong>H 样逐句演绎脚本</strong>格式产出（设问后停顿、斩钉截铁、排比递进、情绪顶点延长）</td>
+<td>主题决定情绪，情绪决定调法——用户拍板的核心链路</td>
+</tr>
+<tr>
+<td><strong>现场</strong></td>
+<td>学生合成时选一次 <code>tts_scene</code>：<code>class 课堂展示 / contest 演讲比赛 / defense 毕业答辩 / report 工作汇报</code></td>
+<td>定正式度与节奏：比赛偏抑扬顿挫、答辩偏沉稳克制</td>
+</tr>
+<tr>
+<td><strong>相对语速档</strong></td>
+<td><code>speech_rate(text, duration) → wpm</code> 与学生原速比较，映射成<strong>相对词</strong>（"从容放慢一档 / 保持你原本的紧凑感 / 比日常稍快、字字清楚"）</td>
+<td>§3.4 实测教训：绝对数值（"每分钟 N 字"）收效率低，<strong>只用相对档位</strong></td>
+</tr>
+<tr>
+<td><strong>短板导向</strong></td>
+<td>从 <code>evaluations.payload</code> 取 fluency/delivery 维度得分与 <code>notes</code> 关键词</td>
+<td>弱则"清晰平稳、句间留呼吸"，强则"更自然松弛"，让朗读成为一次"标准示范"</td>
+</tr>
+</tbody>
+</table>
+<p><code>optimize_instructions=true</code> 常开（用户拍板的 B 模式，<code>TTS_INSTRUCTIONS=0</code> 可关），让模型把粗线条指令细化为演绎。<strong>注意</strong>：数值 <code>rate</code> 在这个通道不存在，语速靠相对词 + 标点停顿实现；若实测明显不满足，切 D3 的备选通道（CosyVoice 数值 rate）。</p>
+<h3 id="62-分块合成与无缝拼接">6.2 分块合成与无缝拼接</h3>
+<p>512 Token 上限决定了"一次调用"不可能。切块算法（<code>app/tts.py</code>，纯函数 <code>plan_chunks(text, segments) -&gt; list[str]</code>）：</p>
+<ul>
+<li>以 <code>segments</code>（带 <code>start</code>/<code>text</code>）为句级边界，<strong>绝不在句中切开</strong>——句中被切开的韵律断裂是拼接最主要瑕疵来源；</li>
+<li>累积到 <code>TTS_CHUNK_CHARS</code>（默认 <strong>1600 字符</strong>，对英语约 400 Token，给 512 Token 留足余量）就封块；</li>
+<li>块数上限 <code>TTS_MAX_CHUNKS</code>（默认 8），超限走 §7.3 闸门直接拒绝并说明原因，不偷偷放宽；</li>
+<li>每块带<strong>同一份</strong> instructions + 同一 voice +（若通道支持）同一 <code>seed</code>，抑制跨块的音色/情绪漂移。</li>
+</ul>
+<p>拼接（<code>app/media.py</code> 新增 <code>concat_audio(paths, dest, ...)</code>，ffmpeg 已有封装 <code>_exe/ffmpeg_exe</code> 可复用）：统一重编码为 <code>24kHz 单声道 mp3 48kbps</code>，块间插入 ~250ms 静音垫片；产出单文件 <code>tts/speech.mp3</code>。分块临时 mp3 用后即删（磁盘友好），仅保留整段。</p>
+<figure class="mmd"><div class="bar"><span class="chip">mermaid 流程图</span><span class="state" data-state="wait">等待渲染…</span><button type="button" class="btn mmd-btn" data-target="mmd-2">取 mermaid 源码</button><button type="button" class="btn cp-btn" data-target="mmd-2">复制源码</button><button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button><button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button><button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div><div class="stage" id="stage-2"><pre class="pending">flowchart LR
+  A[&quot;生效稿&lt;br/&gt;script_text 或 transcript&quot;] --&gt; B[&quot;tts_feasibility&lt;br/&gt;字符数 / 块数闸门&quot;]
+  B -- 不通过 --&gt; X[&quot;回执原因&lt;br/&gt;不发任何请求&quot;]
+  B -- 通过 --&gt; C[&quot;plan_chunks&lt;br/&gt;按句切块 ≤1600 字&quot;]
+  C --&gt; D[&quot;GATE.slot 内逐块&lt;br/&gt;QwenClient.tts&quot;]
+  D --&gt; E[&quot;audio.url&lt;br/&gt;24 小时内立即下载&quot;]
+  E --&gt; F[&quot;concat_audio&lt;br/&gt;ffmpeg 重编码拼接&quot;]
+  F --&gt; G[&quot;artifact/视频id/tts/speech.mp3&lt;br/&gt;分块临时文件即删&quot;]
+  G --&gt; H[&quot;asset 路由 Range 伺服&lt;br/&gt;页面 audio 播放器&quot;]</pre></div><pre class="mmdsrc" id="mmd-2" hidden>flowchart LR
+  A[&quot;生效稿&lt;br/&gt;script_text 或 transcript&quot;] --&gt; B[&quot;tts_feasibility&lt;br/&gt;字符数 / 块数闸门&quot;]
+  B -- 不通过 --&gt; X[&quot;回执原因&lt;br/&gt;不发任何请求&quot;]
+  B -- 通过 --&gt; C[&quot;plan_chunks&lt;br/&gt;按句切块 ≤1600 字&quot;]
+  C --&gt; D[&quot;GATE.slot 内逐块&lt;br/&gt;QwenClient.tts&quot;]
+  D --&gt; E[&quot;audio.url&lt;br/&gt;24 小时内立即下载&quot;]
+  E --&gt; F[&quot;concat_audio&lt;br/&gt;ffmpeg 重编码拼接&quot;]
+  F --&gt; G[&quot;artifact/视频id/tts/speech.mp3&lt;br/&gt;分块临时文件即删&quot;]
+  G --&gt; H[&quot;asset 路由 Range 伺服&lt;br/&gt;页面 audio 播放器&quot;]</pre></figure>
+<h3 id="63-产物落盘与伺服">6.3 产物落盘与伺服</h3>
+<ul>
+<li><code>audio.url</code>（24h）→ 服务端 <code>requests.get(stream=True)</code> 立即落盘到 <code>settings.artifact_dir/{video_id}/tts/speech.mp3</code>；<strong>URL 不写库、不进模板</strong>（避免过期 404 与签名外泄）。</li>
+<li>伺服复用 <code>GET /videos/{id}/asset/{name:path}</code>，需改两处：</li>
+<li><code>ASSET_RE</code> → <code>^(?:cover\.jpg|audio\.wav|frames/frame_\d{1,3}\.jpg|tts/speech\.mp3)$</code></li>
+<li>mime 判定 → 加 <code>.mp3 → audio/mpeg</code>（现有 <code>_stream</code> 已支持 Range，浏览器可拖进度条）</li>
+<li>页面用原生 <code>&lt;audio controls src="/videos/{id}/asset/tts/speech.mp3"&gt;</code>，并显示"本段朗读依据：原始稿 / 修订稿（已采纳 N 处）"。</li>
+<li>成稿变更后音频标记过期：存 <code>tts_meta.text_hash</code>，与当前生效稿哈希不符时页面提示"稿子已改，建议重新合成"（不自动重跑，不自动花钱）。</li>
+</ul>
+<h3 id="64-后台任务与进度">6.4 后台任务与进度</h3>
+<p>一次合成 = 1~8 次网络调用 + 下载 + ffmpeg，<strong>不能同步占住 HTTP 请求</strong>。<code>pipeline.py</code> 做一处 ~12 行的最小扩展：</p>
+<div class="codeline"><div class="bar"><span class="chip">python</span><button type="button" class="btn cp-btn" data-target="code-4">复制代码</button></div><div class="codeslot" id="code-4"><div class="codehilite"><pre><span></span><span class="k">def</span> <span class="nf">submit</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="n">video_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>   <span class="c1"># 与 enqueue 同构，_active 互斥沿用</span>
+    <span class="k">if</span> <span class="n">video_id</span> <span class="ow">in</span> <span class="n">_active</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="n">_active</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">video_id</span><span class="p">)</span>
+    <span class="n">_pool_instance</span><span class="p">()</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">_job_worker</span><span class="p">,</span> <span class="n">fn</span><span class="p">,</span> <span class="n">video_id</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">True</span>
+</pre></div></div></div>
+<p><code>_job_worker</code> 复用现有异常兜底（失败写 <code>tts_status=failed</code> + <code>tts_error[:1500]</code>）。前端沿用 <code>progress.html</code> 已经在轮询的 <code>GET /videos/{id}/status</code>，新增进度点：<code>排队 5 → 分块 i/N 递增到 90 → 拼接 95 → 完成 100</code>。<code>_active</code> 的语义是"一个视频同时只跑一个后台任务"，正好防止"分析中点合成"。</p>
+<h3 id="65-失败与降级">6.5 失败与降级</h3>
+<table>
+<thead>
+<tr>
+<th>情况</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>无 API Key / mock 模式</td>
+<td>不合成，回执"需在线模式"；<strong>绝不用 ffmpeg 生噪声伪造音频</strong>（与压缩 mock 不同，朗读没有可信的假产物）</td>
+</tr>
+<tr>
+<td>模型名不可用（403/model not found）</td>
+<td><code>is_model_error()</code> → <code>_try_models</code> 降级 <code>qwen3-tts-flash</code>（丢 instructions 但保留朗读），warning 留痕</td>
+</tr>
+<tr>
+<td>单块失败且无降级模型</td>
+<td>整次合成失败并删除已下载分块，不产出"缺一截"的残缺音频</td>
+</tr>
+<tr>
+<td>下载超时 / URL 已过期</td>
+<td>该块重试一次（<code>_post</code> 现有退避只对 408/409/429/5xx，下载单独处理）</td>
+</tr>
+<tr>
+<td>ffmpeg 缺失</td>
+<td>保留第一块为整段并 warning（明确标注"仅含前 N 字"）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="66-改动清单与自测">6.6 改动清单与自测</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/tts.py</code></td>
+<td>新增：<code>TtsResult</code>、<code>plan_chunks()</code>、<code>infer_style()</code>（第一级情感推断 + 规则降级）、<code>QwenClient.tts()</code> 调用封装、<code>download_audio()</code>、<code>build_instructions()</code>（第二级拼装）</td>
+<td>~230 行</td>
+</tr>
+<tr>
+<td><code>app/qwen.py</code></td>
+<td>加 <code>_native_url()</code>、<code>tts()</code>、<code>FALLBACKS["tts"]</code>、<code>track_characters()</code></td>
+<td>~60 行</td>
+</tr>
+<tr>
+<td><code>app/media.py</code></td>
+<td>加 <code>concat_audio()</code></td>
+<td>~35 行</td>
+</tr>
+<tr>
+<td><code>app/pipeline.py</code></td>
+<td>加 <code>submit/_job_worker</code> + <code>run_tts(video_id, scene, style)</code></td>
+<td>~70 行</td>
+</tr>
+<tr>
+<td><code>app/main.py</code></td>
+<td><code>POST /videos/{id}/tts/synthesize</code>；扩 <code>ASSET_RE</code> 与 mime（路由 32 → 33）</td>
+<td>~45 行</td>
+</tr>
+<tr>
+<td><code>app/config.py</code></td>
+<td>6 项 TTS 配置 + <code>ENV_GROUPS</code>（31 项 → 43 项，D 线再 +2 → 45 项，修订超时 +1 → 46 项，同主题模糊匹配 +1 → 47 项，见 §9.8）</td>
+<td>~35 行</td>
+</tr>
+<tr>
+<td><code>app/db.py</code></td>
+<td>+4 列：<code>tts_status / tts_path / tts_error / tts_meta</code></td>
+<td>~6 行</td>
+</tr>
+<tr>
+<td><code>app/prompts.py</code></td>
+<td>两个可编辑块：<code>tts_style</code>（第一级情感推断，tokens: topic/requirements/scene/opening，<code>strict_braces=True</code>）+ <code>tts_instructions</code>（第二级拼装模板）</td>
+<td>~35 行</td>
+</tr>
+<tr>
+<td><code>tests/selfcheck</code></td>
+<td>+6 条：切块不破句、块数闸门、instructions 含相对语速档与场景、<code>infer_style()</code> 输出异常时落规则模板不阻塞、<code>concat_audio</code> 用 ffmpeg <code>anullsrc</code> 生成两块后真实拼接（校验时长≈两块和）、mock 模式不产出音频且不报错</td>
+<td>+6</td>
+</tr>
+<tr>
+<td><code>tests/smoke</code></td>
+<td>+5 条：三条 script 路由 + 合成路由 + <code>asset/tts/speech.mp3</code>（含 Range 206）</td>
+<td>+5</td>
+</tr>
+</tbody>
+</table>
+<p>自测基线：selfcheck <strong>189 → 约 205</strong>，smoke <strong>258 → 约 268</strong>（条数以实现为准，全绿为验收线）。实际交付口径（含 D 线声音复刻与修订超时修复，及后续同主题模糊匹配、对比页与报告页双下拉、报告页对照区只认本次主题（无同主题历史整块不显示）、改进建议清洗批次、两页主题/次数下拉统一 <code>.pick-bar</code> 尺寸（超长只做 CSS 截断并把全文写进 <code>title</code> 悬停）、上传分段计时日志批次、上传进度视图批次（两者同见设计报告 §8.5）、上传后自动分析不再丢 <code>auto=1</code>（submitter 修复，设计报告 §8.5 第 5 条）+ 界面细节批次（长题目多行框、选择文件按钮同档放大、百分比读数 26px、栏目标签去重、长标签换行不撑破布局，设计报告 §13））：selfcheck <strong>290/290</strong>、smoke_web <strong>333/333</strong>，见 §9.8。</p>
+<hr />
+<h2 id="7-配置、成本与闸门">7. 配置、成本与闸门</h2>
+<h3 id="71-新增环境变量（env_groups-31-47-项，设置页自动列举）">7.1 新增环境变量（<code>ENV_GROUPS</code> 31 → 47 项，设置页自动列举）</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>标签</th>
+<th>默认</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>REVISE_ENABLED</code></td>
+<td>文字稿修订</td>
+<td>1</td>
+<td>填 0 时报告页隐藏该节（沿用"新开关默认开、填 0 退旧行为"惯例）</td>
+</tr>
+<tr>
+<td><code>REVISE_MODEL</code></td>
+<td>修订模型</td>
+<td>沿用 <code>CHAT_MODEL</code></td>
+<td>留空跟随文本通道</td>
+</tr>
+<tr>
+<td><code>REVISE_TIMEOUT</code></td>
+<td>修订请求超时(秒)</td>
+<td>600（下限 60 / 上限 1800）</td>
+<td>比对全稿是整条链路最慢的一次调用（实测 1600 字 349 秒），单独一条预算，不跟随 <code>REQUEST_TIMEOUT=180</code>；填小了会稳定卡在 35% 后报超时</td>
+</tr>
+<tr>
+<td><code>REVISE_MAX_CHANGE_RATIO</code></td>
+<td>全篇改幅上限(%)</td>
+<td>8</td>
+<td>R2 红线</td>
+</tr>
+<tr>
+<td><code>REVISE_MAX_STYLE_ITEMS</code></td>
+<td>润色条目上限</td>
+<td>5</td>
+<td>R5 红线</td>
+</tr>
+<tr>
+<td><code>TTS_ENABLED</code></td>
+<td>朗读合成</td>
+<td>1</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>TTS_MODEL</code></td>
+<td>合成模型</td>
+<td><code>qwen3-tts-instruct-flash</code></td>
+<td>换 <code>cosyvoice-*</code> 即切 B 通道</td>
+</tr>
+<tr>
+<td><code>TTS_VOICE</code></td>
+<td>音色</td>
+<td><code>Neil</code></td>
+<td>男声·字正腔圆新闻腔（用户拍板），非实时 Instruct-Flash 实测可用（§3.4）；需女声改 <code>Cherry</code></td>
+</tr>
+<tr>
+<td><code>TTS_ENDPOINT</code></td>
+<td>合成端点</td>
+<td>空=从 <code>base_url</code> 推导 host</td>
+<td>仅 CosyVoice 北京 workspace 需要填</td>
+</tr>
+<tr>
+<td><code>TTS_CHUNK_CHARS</code></td>
+<td>分块字数</td>
+<td>1600</td>
+<td>必须 &lt; 512 Token 的物理上限</td>
+</tr>
+<tr>
+<td><code>TTS_MAX_CHUNKS</code></td>
+<td>分块数上限</td>
+<td>8</td>
+<td>§7.3 闸门</td>
+</tr>
+<tr>
+<td><code>TTS_INSTRUCTIONS</code></td>
+<td>表现力指令增强</td>
+<td>1</td>
+<td>映射 <code>optimize_instructions</code></td>
+</tr>
+<tr>
+<td><code>TTS_TIMEOUT</code></td>
+<td>合成超时(秒)</td>
+<td>300（下限 30 / 上限 1800）</td>
+<td>单块 HTTP 超时</td>
+</tr>
+<tr>
+<td><code>VOICE_CLONE_ENABLED</code></td>
+<td>声音复刻</td>
+<td>1</td>
+<td>站点级总开关：填 0 收起报告页「我的音色」节并锁死三条复刻路由的入口（<strong>删除音色除外</strong>，见 §9.6）。开启只是放出入口，处理学生录音仍要每个学生单独勾选授权</td>
+</tr>
+<tr>
+<td><code>TTS_VC_MODEL</code></td>
+<td>复刻合成模型</td>
+<td><code>qwen3-tts-vc-2026-01-22</code></td>
+<td>建音色时写进 <code>target_model</code>、合成时必须完全一致的那个模型。官方口径：音色与模型死绑、不可跨模型使用；改这一项会让账号里的旧音色判作废（§9.5 规则 4），值本身按 <code>MODEL_KEYS</code> 统一小写归一</td>
+</tr>
+</tbody>
+</table>
+<p>同步改仓库根 <code>.env.example</code> 与 <code>deploy/env.production</code>（各 15 行，其中复刻 2 行见 §9），并在 <code>/settings</code> 的「文字稿与朗读」分组里自动列举。</p>
+<h3 id="72-量级估算">7.2 量级估算</h3>
+<p>英语演讲按 ~150 词/分钟、平均 5 字符/词（含空格）估：</p>
+<table>
+<thead>
+<tr>
+<th>演讲时长</th>
+<th>字符数</th>
+<th>分块数</th>
+<th>计费字符</th>
+<th>合成 HTTP 调用</th>
+<th>预计耗时</th>
+<th>mp3 体积</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2 分钟</td>
+<td>1,500</td>
+<td>1</td>
+<td>1,500</td>
+<td>1</td>
+<td>20~50 秒</td>
+<td>0.7 MB</td>
+</tr>
+<tr>
+<td>4 分钟</td>
+<td>3,000</td>
+<td>2</td>
+<td>3,000</td>
+<td>2</td>
+<td>40~100 秒</td>
+<td>1.4 MB</td>
+</tr>
+<tr>
+<td>6 分钟</td>
+<td>4,500</td>
+<td>3</td>
+<td>4,500</td>
+<td>3</td>
+<td>60~150 秒</td>
+<td>2.2 MB</td>
+</tr>
+<tr>
+<td>10 分钟</td>
+<td>7,500</td>
+<td>5</td>
+<td>7,500</td>
+<td>5</td>
+<td>100~250 秒</td>
+<td>3.6 MB</td>
+</tr>
+<tr>
+<td>15 分钟</td>
+<td>11,000</td>
+<td>7</td>
+<td>11,000</td>
+<td>7</td>
+<td>140~350 秒</td>
+<td>5.4 MB</td>
+</tr>
+<tr>
+<td>16 分钟+</td>
+<td>&gt;12,800</td>
+<td>8</td>
+<td>闸门拒绝</td>
+<td>0</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>耗时列已按 §3.4 实测锚点校准：367 字符（约 29 秒音频）单块实测 7.6~11.9 秒，Neil 中文满块约 280~320 字符实测 10.9~13.3 秒；G/H 复测（243 字 + 抑扬顿挫指令）往返 15.6~16.3 秒、产物被节奏指令拉长到 ~50 秒。线性外推到 1,600 字符满块约 35~52 秒。另加第一级情感推断 1 次 chat（与"导师提问"同量级，几秒）。<strong>这比初版拍脑袋的"~4 秒/块"高一个量级</strong>——因此合成必须走后台任务 + 进度轮询（§6.5 设计不变，正好接住），页面提示"约需 1~5 分钟，可离开本页"；<code>TTS_TIMEOUT</code> 单块 300 秒仍然够用。计费列需按 §3.4 新发现上修口径：<strong>实际 <code>characters</code> ≈ 正文字数 + 展开后指令</strong>（实测 243 字正文计 459），且指令开销按块数累积——表中"计费字符"理解为下限，页面向学生展示时以 <code>usage</code> 返回值为准。</p>
+<h3 id="73-朗读合成的可行性闸门">7.3 朗读合成的可行性闸门</h3>
+<p>把压缩闸门的口径（<strong>"装不下就提前失败，绝不自动放宽"</strong>）搬过来，在<strong>发起任何一次合成调用之前</strong>算清楚：</p>
+<ol>
+<li><strong>装不下</strong>：<code>len(effective_text) &gt; TTS_MAX_CHUNKS × TTS_CHUNK_CHARS</code> → 不合成，回执"稿件约 N 字符，超过 M 字符上限，请缩短或提高 <code>TTS_MAX_CHUNKS</code>"（原稿与成稿都不动）；</li>
+<li><strong>跑不完</strong>：<code>预计耗时 = 块数 × 单块预算</code> 超过 <code>TTS_TIMEOUT</code> → 回执并给出建议的 <code>TTS_TIMEOUT</code> 值（只提示，不自动改配置）；</li>
+<li><strong>不可用</strong>：mock 模式 / 无 key / <code>TTS_ENABLED=0</code> → 回执对应原因，不发请求。</li>
+</ol>
+<p>三条判据写成纯函数 <code>tts_feasibility(text, settings) -&gt; (ok, note)</code>，与 <code>compress.feasibility()</code> 一样可单测。</p>
+<h3 id="74-磁盘影响">7.4 磁盘影响</h3>
+<p>生产机约 40GB 盘、3Mbps 带宽。视频压缩后 ≤50 MB/个，朗读 mp3 ≤5.4 MB/个（约增加 10%），且 mp3 是<strong>唯一新增的持久产物</strong>（分块临时文件即删）。删除视频时 <code>artifact_dir/{id}/</code> 整目录清理已覆盖，无需额外回收逻辑。下载音频走 <code>3Mbps ≈ 375 KB/s</code>，一个 2 MB 的 mp3 学生端约 6 秒下完——可接受，但<strong>不建议</strong>在列表页批量预取。</p>
+<h3 id="75-修订调用的实测口径（耗时与-token）">7.5 修订调用的实测口径（耗时与 token）</h3>
+<p>初版设计把「比对全稿」按 5~10 秒估（见 §2 决策 D2），真实云端复测证明估低了两三个量级。实测条件：1,606 字文字稿、<code>qwen3.8-flash</code>、一次完整 <code>chat</code> 调用——</p>
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>实测值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>往返耗时</td>
+<td><strong>349.4 秒</strong></td>
+<td>11:17:51 发起 → 11:23:40 返回，约 5.8 分钟</td>
+</tr>
+<tr>
+<td>prompt token</td>
+<td>887</td>
+<td>提示词本身很短，慢的不是输入</td>
+</tr>
+<tr>
+<td>completion token</td>
+<td><strong>25,745</strong></td>
+<td>可见输出只有 2,158 字，其余是思维链——模型在"想"，不是在"写"</td>
+</tr>
+<tr>
+<td>total token</td>
+<td>26,632</td>
+<td>一次调用约两万六千 token</td>
+</tr>
+<tr>
+<td>建议条数</td>
+<td>原始 11 条 → 过红线 9 条</td>
+<td>丢 2 条，原因均为 R1「单条幅度超过 20 字」</td>
+</tr>
+</tbody>
+</table>
+<p>这组数字直接解释了用户反馈的「进度条跑到 35% 就卡住、然后突然没了」：35% 之后到 75% 之间就是这一次调用，而它原先跟随全局 <code>REQUEST_TIMEOUT=180</code> 秒——<strong>1,600 字上下的稿子必然被读超时掐死</strong>，且旧口径 retries=3 会再白等两轮（合计 551 秒才落败）。修复口径：</p>
+<ol>
+<li>新增 <code>REVISE_TIMEOUT</code>（默认 <strong>600 秒</strong>，范围 60~1800），只给修订调用用。600 ≈ 实测 349 秒的 1.7 倍，给更长的稿子留余量；下限 60 防止误填出比旧值更糟的配置。</li>
+<li>修订调用 retries 收成 <strong>2</strong>：超时多半是模型真在慢慢想，重复发请求只会白等三倍时间、白付三倍 token。</li>
+<li>进度文案与页面计时条改为实测口径（「一千字上下要五六分钟，别关页面」），35% 停留属正常。</li>
+<li>排障噪音修正：探针日志里那句「网关排队 349s 后才发出请求」是旧计时口径的产物（起点取在排队前、终点取在请求完成后，量到的其实是「排队 + 整次请求」）。<code>RequestGate.slot</code> 已改为只量到 <code>acquire()</code> 成功为止，并且超过 5 秒才打印——以后再见这个数字就是真排队。</li>
+</ol>
+<hr />
+<h2 id="8-实施顺序、工作量与验收">8. 实施顺序、工作量与验收</h2>
+<table>
+<thead>
+<tr>
+<th>步</th>
+<th>内容</th>
+<th>独立验收点</th>
+<th>预计工时</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><strong>通道验证</strong>：拿客户 key 跑一次真实 TTS（512 Token 内）+ 一次 instructions 生效确认；确认地域/开通情况</td>
+<td>✅ 已完成（含 Neil 补充实测）：6 次调用全 200，真实返回字段与规格已回填 §3.4；样音 <code>dist/tts-probe/</code>（A/B/C=Cherry，D/E/F=Neil 男声新闻腔，E/F 验证“主题→情感”可控；G/H 复测节奏指令，用户人耳选定 <strong>H 逐句演绎脚本</strong>为 §6.1 模板基底）</td>
+<td>0.5 天</td>
+</tr>
+<tr>
+<td>1</td>
+<td><strong>A 线</strong>：<code>revise.py</code> + prompts + 配置 + 校验 + 6 条单测（纯函数为主，无 UI）</td>
+<td>mock 全绿；真实模式跑一份样例稿，diff 列表合理且 R1~R5 生效</td>
+<td>1 天</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>B 线</strong>：db 4 列 + 三条路由 + <code>report.html</code> 确认节</td>
+<td>采纳 3 条后 <code>script_text</code> 正确；「保持原稿」= 与 <code>transcript</code> 逐字节相同</td>
+<td>1 天</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>C 线</strong>：<code>tts.py</code> + <code>media.concat_audio</code> + <code>pipeline.submit</code> + 4 列 + 合成路由 + 播放器</td>
+<td>6 分钟样稿合成成功、无听感接缝、Range 拖动正常；闸门与 mock 降级都按预期</td>
+<td>1.5~2 天</td>
+</tr>
+<tr>
+<td>4</td>
+<td>文档闭环（设计报告新增一节 + 部署手册配置表 + 重出 HTML + 重打包）</td>
+<td>文档数字与实测一致（本次踩过的坑，逐条核对）</td>
+<td>0.5 天</td>
+</tr>
+<tr>
+<td>5</td>
+<td>部署与提交（先测、再部署、后提交；<code>/health</code> 指纹确认）</td>
+<td>线上指纹 = 新包 sha，<code>/videos/{id}</code> 可见新节</td>
+<td>0.5 天</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>D 线（用户追加）</strong>：<code>voice.py</code> 挑样 + <code>qwen.create_voice/delete_voice</code> + <code>users</code> 7 列 + <code>run_voice</code> + 三条路由 + 报告页「我的音色」节</td>
+<td>✅ 已完成：selfcheck <strong>290/290</strong>、smoke_web <strong>333/333</strong>（含后续同主题模糊匹配、对比页与报告页双下拉、报告页对照区只认本次主题、改进建议清洗批次、两页下拉统一 <code>.pick-bar</code> 尺寸、上传分段计时日志、上传进度视图、上传后自动分析修复与界面细节批次）；mock 或 <code>VOICE_CLONE_ENABLED=0</code> 时入口收起；管理员不能代为授权/重做/删除</td>
+<td>1 天</td>
+</tr>
+</tbody>
+</table>
+<p>合计约 5 个工作日（不含客户 key 申请与网络排障），D 线为追加项另计 1 天。步骤 0 是<strong>硬前置</strong>：通道不通，C 线的选型要当场改，越晚发现越贵。A/B 线不依赖 TTS，可先行。</p>
+<hr />
+<h2 id="9-d-线-·-声音复刻（学生本人音色）">9. D 线 · 声音复刻（学生本人音色）</h2>
+<h3 id="91-为什么要做，以及它的边界">9.1 为什么要做，以及它的边界</h3>
+<p>C 线上线后用户追问的一句：<strong>"示范朗读能不能用我自己的声音？"</strong> 官方侧确实支持——百炼提供<strong>声音复刻</strong>（voice enrollment）接口，用一段真人朗读样本注册出专属音色，之后用<strong>同一个合成模型</strong>朗读即按原声出音。</p>
+<p>这个功能的价值不在"好玩"。听 Neil 读自己的稿子，听到的是播音员的流畅；听<strong>自己的嗓子</strong>读改后的稿子，哪里绊住、哪里吞字，一听就知道。所以 D 线接在 C 线后面，共用同一条合成路由、同一个产物、同一个播放器。</p>
+<p>因为处理的是<strong>学生人声</strong>（个人敏感信息），这一节的全部设计前提是先立规矩、再放功能。四条规矩把边界钉死：</p>
+<table>
+<thead>
+<tr>
+<th>规矩</th>
+<th>一句话</th>
+<th>落在代码哪里</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>授权前置</td>
+<td>没勾同意，连样本都不抽</td>
+<td><code>run_voice</code> 第一步查 <code>voice_consent_at</code>；<code>_voice_gate</code></td>
+</tr>
+<tr>
+<td>出处可控</td>
+<td>样本只能从<strong>他本段视频</strong>里挑，不接收上传的外部音频</td>
+<td><code>voice.build_sample(Path(video["path"]), ...)</code></td>
+</tr>
+<tr>
+<td>用完即删</td>
+<td>wav 是学生人声的原样，任务收尾无条件删除</td>
+<td><code>_drop_samples()</code> 写在 <code>finally</code> 里</td>
+</tr>
+<tr>
+<td>随时可撤</td>
+<td>撤授权 = 先删远端音色再撤记录；删音色不撤授权</td>
+<td><code>voice/consent</code> 与 <code>voice/delete</code> 两条路由</td>
+</tr>
+</tbody>
+</table>
+<h3 id="92-授权与留痕">9.2 授权与留痕</h3>
+<ul>
+<li><code>users.voice_consent_at</code> 记<strong>时间戳</strong>而不是布尔值：万一有争议，能说清"什么时候授的权、什么时候撤的"。页面上是一段完整的授权说明（用途、样本只出自本视频、用完即删、可随时撤回），不是藏在角标里的隐私政策链接。</li>
+<li><strong>撤回的顺序是刻意的</strong>：先删远端音色、再清授权记录。反过来做会在授权已撤之后丢掉 <code>voice</code> 标识——学生的人声就永远挂在服务方那边，本地再也找不着线索。</li>
+<li>远端删除失败（500 / 网络错）时授权<strong>保持已勾选</strong>，回执"音色删除失败，授权暂未撤回（原因），请稍后重试"：宁可让用户多点一次按钮，也不能把"已删除"记成假账。远端返回 404（本来就没有）按删除成功处理，否则被服务方清理过的人永远删不动。</li>
+<li><strong>删除音色不撤回授权</strong>：想换个片段重做的人不该被要求重新勾一遍同意，回执写明"已删除本人音色（voice 标识），授权仍然保留，可随时用别的片段重做"。</li>
+<li>管理员能看学生的报告，但<strong>不能代为授权、重做或删除</strong>（<code>_voice_gate</code> 判 owner，删除路由单独再判一次）。授权必须本人点，否则"已同意处理录音"这条留痕本身就成了一份伪造证据。</li>
+</ul>
+<h3 id="93-样本只能从本段视频里挑">9.3 样本只能从本段视频里挑</h3>
+<p>转录用的 <code>audio.wav</code> 是 16 kHz（ASR 引擎的规格），而官方要求样本 24 kHz——上采样只会造出假高频，音色质量反受其害。所以复刻<strong>从原视频重抽一份</strong>：<code>media.probe</code> 确认有音轨 → <code>extract_audio_full</code> 出 24 kHz 单声道 → <code>silencedetect</code> 找停顿 → 挑段 → 定长输出 wav。</p>
+<p><code>app/voice.py</code>（新文件）把规则收在一组常量里，改一处即全局生效：</p>
+<table>
+<thead>
+<tr>
+<th>常量</th>
+<th>值</th>
+<th>为什么是这个数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VC_MIN_SPEECH</code></td>
+<td>3.0 秒</td>
+<td>官方口径：样本里要有 ≥3 秒清晰朗读</td>
+</tr>
+<tr>
+<td><code>VC_SAMPLE_MIN</code> / <code>TARGET</code> / <code>MAX</code></td>
+<td>10 / 16 / 20 秒</td>
+<td>官方给的可用区间，取 16 秒为目标（够料，又不至于把口误一起学进去）</td>
+</tr>
+<tr>
+<td><code>VC_MAX_PAUSE</code></td>
+<td>2.0 秒</td>
+<td>停顿超过两秒就不算"连续朗读"，硬粘起来只会拼出结巴的音色</td>
+</tr>
+<tr>
+<td><code>VC_MIN_SILENCE</code></td>
+<td>0.30 秒</td>
+<td>短于此的静默按呼吸处理，不打断链条</td>
+</tr>
+<tr>
+<td><code>VC_NOISE_DB</code></td>
+<td><code>-30dB</code></td>
+<td>ffmpeg 噪声门阈值，低于它的"静默"不算真停顿</td>
+</tr>
+<tr>
+<td><code>VC_QUIET_MEAN_DB</code></td>
+<td>-45.0</td>
+<td>整段平均音量低于此 → 判定这段基本没人说话，<strong>在出门之前就失败</strong>，不烧额度</td>
+</tr>
+<tr>
+<td><code>VC_MAX_BYTES</code></td>
+<td>7,000,000</td>
+<td>Base64 后按 ×4/3 估约 9.3 MB，卡在官方 10 MB 硬上限之内</td>
+</tr>
+<tr>
+<td><code>VC_MIN_BYTES</code></td>
+<td>20,000</td>
+<td>防呆下限：抽出来比这还小，多半是静音或坏文件</td>
+</tr>
+</tbody>
+</table>
+<p>挑段三步都是纯函数，selfcheck 第 17 节逐条断言（含畸形日志）：</p>
+<ol>
+<li><code>detect_windows()</code>：把 <code>silencedetect</code> 的 <code>silence_start / silence_end</code> 成对解析，说话区间取静默的补集。<strong>重复的 start 吞掉、落单的 end 忽略、逆序的丢弃</strong>，但都不卡住后面的配对——ffmpeg 的版本差异不该让整次复刻失败；时长非正不编造区间，静音铺到结尾也不补零宽尾块。</li>
+<li><code>merge_chains()</code>：间隔 ≤ <code>VC_MAX_PAUSE</code> 的区间粘成一条链。</li>
+<li><code>choose_slice()</code>：取最长的链，收尾尽量落在目标长度之后<strong>最近的一次真实停顿</strong>上（不把句子腰斩）；链内实在找不到合规停顿才退化成定长截取。</li>
+</ol>
+<p>失败一律抛 <code>VoiceSampleError</code>，消息形如"最长连续朗读不足 10 秒，达不到官方 ≥3 秒清晰朗读、10~20 秒样本的要求，请换一段更连贯的视频再试"——<strong>人话 + 下一步</strong>，直接进页面回执，学生不必查文档。</p>
+<p>样本落在 <code>data/voices/&lt;user_id&gt;/video_&lt;id&gt;.wav</code>。刻意<strong>不放</strong> <code>artifact_dir/&lt;video_id&gt;/</code>：删视频会把那棵树整个 <code>rmtree</code>，正在跑的复刻任务会在"读完样本之后、送出请求之前"凭空丢文件。收尾在 <code>finally</code> 里 <code>_drop_samples()</code> 无条件清目录，删不掉也不拦流程（下次同名覆盖）。</p>
+<h3 id="94-建音色：账号级一个音色，进度借用视频轮询">9.4 建音色：账号级一个音色，进度借用视频轮询</h3>
+<figure class="mmd"><div class="bar"><span class="chip">mermaid 流程图</span><span class="state" data-state="wait">等待渲染…</span><button type="button" class="btn mmd-btn" data-target="mmd-3">取 mermaid 源码</button><button type="button" class="btn cp-btn" data-target="mmd-3">复制源码</button><button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button><button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button><button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div><div class="stage" id="stage-3"><pre class="pending">flowchart TD
+  A[&quot;报告页 我的音色 节&quot;] --&gt; B[&quot;voice_consent_at 有没有值&quot;]
+  B -- 没有 --&gt; C[&quot;展示授权说明与勾选框&lt;br/&gt;can_consent 单独判定&quot;]
+  C --&gt; D[&quot;同一个按钮 POST voice/create 带 agree&lt;br/&gt;先写授权时间留痕再提交复刻&quot;]
+  D --&gt; E[&quot;提交复刻后台任务&quot;]
+  B -- 有 --&gt; E
+  E --&gt; F[&quot;begin_voice_job 抢行级锁&lt;br/&gt;同账号同时只跑一个&quot;]
+  F -- 抢不到 --&gt; G[&quot;只在本视频写一句说明&lt;br/&gt;绝不动别人持有的记录&quot;]
+  F -- 抢到 --&gt; H[&quot;voice.build_sample&lt;br/&gt;从原视频挑 10~20 秒连续朗读&quot;]
+  H --&gt; I[&quot;qwen.create_voice&lt;br/&gt;Base64 直传 + target_model&quot;]
+  I --&gt; J[&quot;save_user_voice&lt;br/&gt;音色与绑定模型成对写回账号&quot;]
+  J --&gt; K[&quot;stage 我的音色已就绪&lt;br/&gt;页面轮询后自动刷新&quot;]
+  K --&gt; M[&quot;朗读表单里 我的音色 由置灰转为可选&quot;]
+  H -- 挑样不合格 --&gt; L[&quot;mark_voice_error&lt;br/&gt;音色复刻失败并把原因上页&quot;]
+  I -- 未返回 voice --&gt; L</pre></div><pre class="mmdsrc" id="mmd-3" hidden>flowchart TD
+  A[&quot;报告页 我的音色 节&quot;] --&gt; B[&quot;voice_consent_at 有没有值&quot;]
+  B -- 没有 --&gt; C[&quot;展示授权说明与勾选框&lt;br/&gt;can_consent 单独判定&quot;]
+  C --&gt; D[&quot;同一个按钮 POST voice/create 带 agree&lt;br/&gt;先写授权时间留痕再提交复刻&quot;]
+  D --&gt; E[&quot;提交复刻后台任务&quot;]
+  B -- 有 --&gt; E
+  E --&gt; F[&quot;begin_voice_job 抢行级锁&lt;br/&gt;同账号同时只跑一个&quot;]
+  F -- 抢不到 --&gt; G[&quot;只在本视频写一句说明&lt;br/&gt;绝不动别人持有的记录&quot;]
+  F -- 抢到 --&gt; H[&quot;voice.build_sample&lt;br/&gt;从原视频挑 10~20 秒连续朗读&quot;]
+  H --&gt; I[&quot;qwen.create_voice&lt;br/&gt;Base64 直传 + target_model&quot;]
+  I --&gt; J[&quot;save_user_voice&lt;br/&gt;音色与绑定模型成对写回账号&quot;]
+  J --&gt; K[&quot;stage 我的音色已就绪&lt;br/&gt;页面轮询后自动刷新&quot;]
+  K --&gt; M[&quot;朗读表单里 我的音色 由置灰转为可选&quot;]
+  H -- 挑样不合格 --&gt; L[&quot;mark_voice_error&lt;br/&gt;音色复刻失败并把原因上页&quot;]
+  I -- 未返回 voice --&gt; L</pre></figure>
+<ul>
+<li>接口封装在 <code>app/qwen.py</code>：<code>create_voice()</code> 走登记专用模型 <code>qwen-voice-enrollment</code>，<code>input.action=create</code> + <code>target_model=TTS_VC_MODEL</code>，样本以 <code>data:audio/wav;base64,...</code> <strong>直传</strong>。官方支持 Data URL，因此不需要把学生人声放到公网可达的地址上，也不必先落第三方存储。</li>
+<li>备注名清洗（<code>preferred_name_of</code>）：官方只收字母数字下划线且 ≤16 字符，所以实际形如 <code>u12_zhangsan</code>；学生名字是纯中文时退回 <code>student</code>，绝不把带中文的串直接送出去换一次 400。</li>
+<li><strong>一个账号一个音色</strong>，长期复用（不是每个视频一个）。重做即覆盖；<code>voice_source</code> 记下"取自视频 #N《标题》0.0–16.0 秒"，页面直接显示，学生知道这副嗓子来自哪一段。</li>
+<li>进度<strong>借用提交时所在视频的 <code>stage</code> / <code>progress</code> 两列</strong>，页面沿用现成的 <code>/videos/{id}/status</code> 轮询——不为一件事再造一套机制；音色本身按账号存（<code>users</code> 表 7 列），换个视频看报告，音色还在。</li>
+<li>账号级互斥靠 <code>db.begin_voice_job</code> 的<strong>行级抢锁</strong>（条件 UPDATE），路由里的预检只给准信、防不住两个标签页同时点。抢不到锁时<strong>只在本视频留一句说明</strong>，绝不能去写 <code>voice_error</code>——那把锁是别人的任务持有的，写 error 等于把别人的成功改成失败。</li>
+<li>服务方以 <code>fallback_mode</code> 建成音色时（例如样本噪声偏高），如实带 note 上页："相似度可能不足，可重做音色或改用系统音色"，不当成一次干净的成功隐瞒。</li>
+<li>计费按<strong>次</strong>：<code>usage_records</code> 新增 <code>creations</code> 轴（一次创建记一次，不吃 token 也不记字符），<code>/settings</code> 用量表与报告页统计都看得见。</li>
+</ul>
+<h3 id="95-与-c-线接合：选我的音色时的四条硬规则">9.5 与 C 线接合：选「我的音色」时的四条硬规则</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>规则</th>
+<th>实现</th>
+<th>为什么必须这样</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>音色与模型<strong>成对</strong>下传</td>
+<td><code>db.user_voice_for_tts()</code> 一次返回 <code>(voice, model)</code>，任一为空就在动笔前报错</td>
+<td>官方要求合成模型与创建时的 <code>target_model</code> 完全一致，只带 voice 不带 model 等于赌运气</td>
+</tr>
+<tr>
+<td>2</td>
+<td>复刻链路<strong>锁死单模型、不进降级链</strong></td>
+<td><code>is_clone_model()</code>（模型名含 <code>-vc-</code> / <code>-vd-</code>）→ 降级候选置空</td>
+<td>降级到 <code>qwen3-tts-flash</code> 等于悄悄把学生的声音换成 Neil。宁可报错让人重做音色，也不产出"听着不像我"的音频</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>不送表现力指令</strong>，并跳过第一级情感推断</td>
+<td><code>clone=True</code> → <code>instructions</code> 置空、不调 <code>tts_style</code>，页面写明"按你的原声朗读，未附加表现力指令"</td>
+<td>vc 音色不接 instructions（官方口径）；照跑情感推断只是白烧一次 chat</td>
+</tr>
+<tr>
+<td>4</td>
+<td>绑定模型变了就判<strong>作废</strong></td>
+<td><code>voice_model != TTS_VC_MODEL</code> → <code>stale=True</code>，合成侧不给选，页面提示"音色与模型是绑死的，旧音色不能再用，请重做一次"</td>
+<td>管理员改 <code>TTS_VC_MODEL</code> 时，"看起来有音色、合成必失败"是最坏体验</td>
+</tr>
+</tbody>
+</table>
+<p>补一条兜底：远端音色 404（长期不用会被服务方清理）不抛原始错误，包一层"复刻音色在模型 X 上不可用（可能已被服务方清理），请重做我的音色后重试"——把不可恢复的失败指回唯一有效的出路。</p>
+<p><code>tts_meta.clone</code> 落进产物元数据，报告页据此区分"这次是复刻音色按原声朗读"还是"系统音色 + 情感推断"（§9.5 规则 3 那句提示也因此有历史可查）。</p>
+<h3 id="96-三条路由与闸门差异">9.6 三条路由与闸门差异</h3>
+<table>
+<thead>
+<tr>
+<th>路由</th>
+<th>干什么</th>
+<th>过哪些闸门</th>
+<th>唯一不过的</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /videos/{id}/voice/consent</code></td>
+<td>撤回授权（撤 = 先删音色再撤）；也可单独登记授权</td>
+<td><code>_voice_gate</code>：站点开关 + 在线模式 + 本人 + 评价已完成；再加 busy</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>POST /videos/{id}/voice/create</code></td>
+<td>提交复刻后台任务；表单带 <code>agree</code> 时先在同一次提交里登记授权</td>
+<td>上述全部 + <strong>必须已授权</strong>（未授权且没勾同意 → 拦下） + <code>begin_voice_job</code> 抢锁</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>POST /videos/{id}/voice/delete</code></td>
+<td>删音色、保留授权</td>
+<td><strong>只判 owner 与 busy</strong></td>
+<td>故意不过站点开关与在线判定</td>
+</tr>
+</tbody>
+</table>
+<p><code>voice/delete</code> 是整个模块唯一"少一道闸"的入口，理由写进了函数 docstring：<strong>管理员关掉复刻，不能顺便让学生删不掉自己的嗓子</strong>——删除是合规动作，不是功能入口。</p>
+<p>页面上下文由 <code>_voice_ctx()</code> 一次算清（状态、授权留痕、样本规格、两个按钮各自能不能点、busy 原因），模板只渲染不判断。其中 <code>can_consent</code> 与 <code>can_create</code> <strong>必须分开</strong>：没授权正是该勾授权的时候，如果授权框也去看"能不能建音色"，它会被自己的前置条件锁死，用户永远迈不出第一步。</p>
+<p>两处页面结构上的约定，是为了让"下一步点哪里"始终不用找：主行动按钮（合并按钮、授权+创建按钮）一律走 <code>.btn.cta</code> 并用实心朱砂放大，且<strong>表单里控件占一行、提交按钮固定下一行</strong>，位置不随上方复刻节的增减而跳动；朗读表单的"系统音色 / 我的音色"单选组<strong>常驻渲染</strong>，没有音色时那一项 <code>disabled</code> 并置灰（<code>.voice-opt.is-off</code>）+ 一句"在上方创建后即可选"的引导——先让用户看见有这个选项，再告诉他去哪解锁。</p>
+<p>三条路由全部 303 回 <code>/videos/{id}?vmsg=…#voice</code>（<code>_voice_redirect</code>），锚点让页面落回复刻节，回执一律是人话。路由总数 <strong>33 → 36</strong>。</p>
+<h3 id="97-关闭与降级行为">9.7 关闭与降级行为</h3>
+<table>
+<thead>
+<tr>
+<th>情况</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VOICE_CLONE_ENABLED=0</code></td>
+<td>「我的音色」节整节不渲染；consent / create 回执"声音复刻已由管理员关闭，只能使用系统音色"；合成时选 clone 回执"声音复刻已关闭，请用系统音色合成"。<strong>delete 仍放行</strong>（§9.6）</td>
+</tr>
+<tr>
+<td>mock / 无 key</td>
+<td>节内只留"声音复刻需要在线模式"的说明，不放操作按钮；<code>create_voice</code> 在客户端直接抛"真实评审模式未启用或接口密钥缺失"。<strong>绝不静默造一个假音色</strong>——与 §6.5「不在 mock 模式伪造音频」是同一条规矩</td>
+</tr>
+<tr>
+<td>未勾选授权</td>
+<td>合并按钮可用（<code>can_consent</code> 独立判定）；未勾同意直接提交时 create 回执"请先勾选录音处理授权，我们才会读取你原视频里的声音"，授权位与任务位都不被占用；勾上同意则同一次提交里先登记授权再提交复刻；任务侧第一步再查一遍，双保险</td>
+</tr>
+<tr>
+<td>评价未完成</td>
+<td>拦截："评价完成后才能在原视频里挑一段连续朗读做复刻"——挑样依赖已落盘的产物与时长</td>
+</tr>
+<tr>
+<td>该视频已有任务在跑</td>
+<td>busy（<code>voice_status=running</code> 或 <code>pipeline.is_running()</code> 或 <code>tts_status=running</code>）时统一回执等待，防止复刻与合成互相踩产物</td>
+</tr>
+<tr>
+<td>挑样 / 建音色失败</td>
+<td><code>voice_error</code> 落库 + <code>stage=音色复刻失败</code>，页面显示原因前 180 字并直接给重做按钮；<code>submit()</code> 的 <code>on_error</code>（<code>run_voice_error</code>）兜住"崩在 try 之外"的情况</td>
+</tr>
+</tbody>
+</table>
+<h3 id="98-改动清单与自测">9.8 改动清单与自测</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/voice.py</code></td>
+<td>新文件：silencedetect 解析、说话区间、链合并、挑段、样本抽取、体积与音量防呆、<code>VoiceSampleError</code></td>
+<td>240 行（全新增）</td>
+</tr>
+<tr>
+<td><code>app/qwen.py</code></td>
+<td><code>VOICE_ENROLLMENT_MODEL</code>、<code>create_voice()</code>、<code>delete_voice()</code>、<code>_post_vc()</code>、<code>is_clone_model()</code>、<code>preferred_name_of()</code>、<code>tts()</code> 的 clone 分支与 404 包文案、<code>creations</code> 计轴</td>
+<td>~130 行</td>
+</tr>
+<tr>
+<td><code>app/db.py</code></td>
+<td><code>users</code> +7 列（<code>voice_id / voice_model / voice_created_at / voice_error / voice_consent_at / voice_source / voice_status</code>）+ <code>voice_status</code>、<code>set_voice_consent</code>、<code>begin_voice_job</code>、<code>save_user_voice</code>、<code>mark_voice_error</code>、<code>clear_user_voice</code>、<code>user_voice_for_tts</code></td>
+<td>~110 行</td>
+</tr>
+<tr>
+<td><code>app/pipeline.py</code></td>
+<td><code>run_voice</code> / <code>run_voice_error</code> / <code>drop_voice</code> / <code>_voice_dir</code> / <code>_drop_samples</code>；<code>submit()</code> 增第三参 <code>on_error</code></td>
+<td>~90 行</td>
+</tr>
+<tr>
+<td><code>app/main.py</code></td>
+<td>3 条路由（<strong>33 → 36</strong>）+ <code>_voice_gate</code> / <code>_voice_ctx</code> / <code>_voice_redirect</code>；合成路由接 <code>voice=clone</code>；<code>_tts_ctx</code> 带 <code>clone</code> / <code>used_clone</code></td>
+<td>~110 行</td>
+</tr>
+<tr>
+<td><code>app/config.py</code></td>
+<td>2 个 <code>EnvField</code>（<code>ENV_FIELDS</code> 43 → <strong>45</strong>）+ <code>MODEL_KEYS</code> 收 <code>TTS_VC_MODEL</code></td>
+<td>~15 行</td>
+</tr>
+<tr>
+<td><code>app/templates/report.html</code></td>
+<td>「我的音色 · 声音复刻」节：授权说明、状态与进度、作废/失败提示、创建与重做与删除按钮、朗读音色二选一</td>
+<td>~90 行</td>
+</tr>
+<tr>
+<td><code>tests/selfcheck.py</code></td>
+<td>新增第 17 节声音复刻 <strong>36 条</strong>：畸形日志解析、停顿合并、收尾落点、样本规格与下限、Base64 载荷与 <code>target_model</code> 归一、mock 拦停、授权先拦、状态机、stale、删远端优先、404 视作删除成功、clone 不送指令、跳过情感推断</td>
+<td>+36</td>
+</tr>
+<tr>
+<td><code>tests/smoke_web.py</code></td>
+<td>新增 7b 复刻链路 <strong>30 条</strong>：mock 与开关关闭时的收起、授权留痕、创建走后台任务并跑完、音色写回账号、来源记录、管理员越权拦截、删除失败保持授权、删音色保留授权、还原后退回在线提示、未授权又没勾同意时合并入口被拦下、未授权页只有一个「同意授权并创建我的音色」按钮、没建音色时「我的音色」单选常驻但置灰、建好后解禁</td>
+<td>+30</td>
+</tr>
+</tbody>
+</table>
+<p>桩<strong>只打在 <code>_post_vc</code> 这一个网络叶子</strong>上（两套测试同一口径）：路由、模板渲染、ffmpeg 抽样、样本落盘与删除、DB 状态机、后台线程与行级抢锁全部走真代码。验收线：selfcheck <strong>290/290</strong>、smoke_web <strong>333/333</strong>。</p>
+<p>一处时序教训值得记：等后台复刻跑完时，<strong>完成门必须用 <code>pipeline.is_running(video_id)</code>，不能用 <code>voice_status == "running"</code></strong>。<code>running</code> 是任务线程内 <code>begin_voice_job</code> 才写的，主线程读早了拿到空串会直接跳过等待；而 <code>submit</code> 在请求线程里同步登记 <code>_active</code>，任务收工才摘掉，<code>save_user_voice</code> / <code>mark_voice_error</code> 都在摘掉之前写完——所以"is_running 落下即终态"是逻辑上成立的等待条件，与线程调度快慢无关。同理，临时注入的 mock 客户端与开关必须撑到任务结束再还原，否则迟到的线程会拿着已还原的演示模式去建客户端。</p>
+<hr />
+<h2 id="10-明确不做的事">10. 明确不做的事</h2>
+<ol>
+<li><strong>不做无授权、无约束的声音复刻</strong>：D 线（§9）只允许「本人勾选授权 + 样本只从本段视频挑 + 用完即删 + 随时可撤回并删除音色」这一种形态。上传外部音频、替别人建音色、批量音色定制、把某人的音色挪给别的账号用，一律不做——这些正是原方案把"语音克隆"列为不做的原因，实现后依然成立。</li>
+<li><strong>不重跑评分</strong>：修订稿不参与打分（§4.4），避免"改稿刷分"和证据失效。</li>
+<li><strong>不做逐字对齐字幕/音画同步</strong>：<code>word_timestamp_enabled</code> 在 CosyVoice 侧且需换通道；本期只给整段音频 + 原视频时间点跳转。</li>
+<li><strong>不做无限改稿</strong>：R1~R5 是硬闸门，不实现"自动扩写"或"帮我重写整篇"。</li>
+<li><strong>不做自动合成</strong>：每份稿子必须学生点一次按钮（花钱、花时间、且可能不需要）。</li>
+<li><strong>不动 <code>transcript</code></strong>：任何路径都不覆盖原始 ASR 稿。</li>
+<li><strong>不在 mock 模式伪造音频</strong>：宁可没有，不做假的。</li>
+</ol>
+<hr />
+<h2 id="11-风险与待确认">11. 风险与待确认</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>风险</th>
+<th>概率/影响</th>
+<th>应对</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>K1</td>
+<td><strong>客户 key 地域不符</strong>（CosyVoice 新链路仅北京 workspace；国际站部分能力地域受限）</td>
+<td><del>中/高</del> <strong>已消解</strong>：确认为内地百炼 key，且 §3.4 实测主选通道直接可用；<code>TTS_ENDPOINT</code> 口子保留</td>
+<td></td>
+</tr>
+<tr>
+<td>K2</td>
+<td><strong><code>qwen3-tts-instruct-flash</code> 未开通</strong></td>
+<td><del>中/中</del> <strong>已消解</strong>：控制台已开通且实测 3 次调用全部 200；<code>FALLBACKS["tts"]</code> 降级链仍保留（防后续欠费/限流）</td>
+<td></td>
+</tr>
+<tr>
+<td>K3</td>
+<td>返回字段与文档不完全一致（<code>audio.url</code> vs <code>audio.data</code>）</td>
+<td><del>中/中</del> <strong>已消解</strong>：实测与文档一致（url 有值、data 空串）；<code>tts()</code> 仍按"url 优先、data 回退"双兼容写</td>
+<td></td>
+</tr>
+<tr>
+<td>K4</td>
+<td><strong>跨块韵律漂移</strong>（拼接后语气/音色跳变）</td>
+<td>中/中</td>
+<td>句末切块 + 同 instructions + 同 voice +（可用则）同 seed；块间 250ms 静音垫片；实在严重时把 <code>TTS_CHUNK_CHARS</code> 调大或换长文本流式通道</td>
+</tr>
+<tr>
+<td>K5</td>
+<td><strong>ASR 专名错字无法靠语言模型判定</strong>（"Hinton"→"hint on" 这类，模型不知道正确专名）</td>
+<td>高/中</td>
+<td>术语提示框让学生/老师填（<code>glossary</code> 进 prompt），并把这类错字归到 <code>term</code> 类只提示不硬改；这是纠错功能的固有上限，需在 UI 文案里说清</td>
+</tr>
+<tr>
+<td>K6</td>
+<td>instructions 里的"语速"不精确（该通道无数值 rate）</td>
+<td><del>高/低-中</del> <strong>实测已确认并修订</strong>：绝对数值（"每分钟 N 字"）收效率低（§3.4 补充实测），改为 wpm 只用于选<strong>相对语速档</strong>；仍不满足则切 D3 备选通道（数值 <code>rate 0.5~2.0</code>）</td>
+<td></td>
+</tr>
+<tr>
+<td>K7</td>
+<td>成本失控（学生反复点"重新生成"/"重新合成"）</td>
+<td>低/中</td>
+<td>页面显示本次字符数与调用次数；<code>script_status=proposed</code> 时重复点击给确认提示；沿用现有 <code>add_usage</code> 记账，管理员可在 <code>/settings</code> 用量表看到</td>
+</tr>
+<tr>
+<td>K8</td>
+<td>报告页变长导致首屏变慢</td>
+<td>低/低</td>
+<td>新节默认折叠（<code>&lt;details&gt;</code>），只在本视频开启过修订时展开</td>
+</tr>
+<tr>
+<td>K9</td>
+<td>并发：多人同时合成挤占 <code>GATE</code></td>
+<td>中/中</td>
+<td>合成与评审共用 <code>GATE</code>，天然排队；<code>TTS_MAX_CHUNKS</code> 限制单任务长度；必要时后续给 TTS 单独信号量（本期不做）</td>
+</tr>
+<tr>
+<td>K10</td>
+<td><strong>音色与模型死绑</strong>：<code>TTS_VC_MODEL</code> 一旦改动，学生已建的音色全部不可用（§9.5 规则 4）</td>
+<td>中/中</td>
+<td>该键只给运维改、不给页面改，改前需公告；<code>db.voice_status()</code> 比对绑定模型后把老音色判成 <code>stale</code>（作废），页面直接提示重做，不让学生在第 3 步报错后自己猜原因</td>
+</tr>
+<tr>
+<td>K11</td>
+<td><strong>服务方清理长期不用的音色</strong>（复刻音色的服务端保留策略未承诺期限）</td>
+<td>中/低</td>
+<td>合成侧对这类 404 包一层明说文案「复刻音色在模型 X 上不可用（可能已被服务方清理），请重做我的音色后重试」，任务标 <code>failed</code>；本地样本用完即删，重建只需学生再点一次</td>
+</tr>
+<tr>
+<td>K12</td>
+<td>复刻失败率高于在线朗读（样本静音多、噪声大、说话时长不足）</td>
+<td>中/中</td>
+<td>§9.3 的挑段常量（最短 3 秒人声、样本 10~20 秒、噪声上限 −30dB）在送样本前就做闸；不合格直接给"这段视频没有合适样本"的明说，不烧一次必败的调用</td>
+</tr>
+</tbody>
+</table>
+<p><strong>曾需用户先确认的两件事（均已答复，不再阻塞）</strong>：
+1. <del>当前生产 API Key 是中国内地的百炼 key 吗？是否已开通 <code>qwen3-tts-instruct-flash</code>？</del> → 已确认：内地百炼 key、模型已开通，§3.4 实测通过；
+2. <del>朗读产物用途是"给学生听示范"还是"要提交给老师的作业音频"？</del> → 已确认为<strong>学生示范</strong>，K4（跨块接缝）维持"中"档处置，按现方案（句末切块 + 静音垫片 + 试听后重合成）执行。</p>
+  </article></main>
+</div>
+
+<p class="pagefoot">本页由 <code>tools/build_html.py</code> 从 Markdown 源生成。改内容请改 <code>.md</code> 后重新生成，不要直接编辑 HTML。</p>
+<script>
+(function () {
+  var PAGE_NAME = "方案-文字稿纠错与朗读合成.html";
+  var seq = 0;
+
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._h);
+    t._h = setTimeout(function () { t.classList.remove('show'); }, 2200);
+  }
+
+  function copyText(text, label) {
+    function legacy() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.readOnly = true;
+      ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      toast(ok ? label + '已复制' : '复制失败，请手动选中');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(label + '已复制'); }, legacy);
+    } else { legacy(); }
+  }
+
+  function textOf(id) {
+    var el = document.getElementById(id);
+    if (!el) return '';
+    var pre = el.tagName === 'PRE' ? el : (el.querySelector('pre') || el);
+    return pre.innerText.replace(/\s+$/, '');
+  }
+
+  document.querySelectorAll('.cp-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      copyText(textOf(b.dataset.target), b.textContent.indexOf('源码') >= 0 ? 'mermaid 源码' : '代码');
+    });
+  });
+
+  document.querySelectorAll('.mmd-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var src = document.getElementById(b.dataset.target);
+      if (!src) return;
+      var fig = src.closest('figure.mmd');
+      var open = !fig.classList.contains('showsrc');
+      fig.classList.toggle('showsrc', open);
+      b.classList.toggle('on', open);
+      b.textContent = open ? '收起 mermaid 源码' : '取 mermaid 源码';
+    });
+  });
+
+  function zoomFig(fig, act) {
+    var svg = fig.querySelector('.stage svg');
+    if (!svg) return;
+    if (!fig.dataset.base) {
+      var w = Math.round(svg.getBoundingClientRect().width);
+      fig.dataset.base = String(w > 0 ? w : 640);
+    }
+    var z = parseFloat(fig.dataset.zoom || '1');
+    if (act === 'in') z = Math.min(3, Math.round((z + 0.25) * 100) / 100);
+    else if (act === 'out') z = Math.max(0.5, Math.round((z - 0.25) * 100) / 100);
+    else z = 1;
+    fig.dataset.zoom = String(z);
+    if (z === 1) { svg.style.maxWidth = ''; svg.style.width = ''; }
+    else { svg.style.maxWidth = 'none'; svg.style.width = (parseFloat(fig.dataset.base) * z) + 'px'; }
+    setState(fig, z === 1 ? '已渲染 · 源码可取' : '缩放 ' + Math.round(z * 100) + '%', z === 1 ? 'ok' : 'wait');
+  }
+  document.querySelectorAll('.z-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var fig = b.closest('figure.mmd');
+      if (fig) zoomFig(fig, b.dataset.act);
+    });
+  });
+
+  var CDNS = [
+    'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js',
+    'https://unpkg.com/mermaid@11/dist/mermaid.min.js'
+  ];
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  function setState(fig, text, kind) {
+    var st = fig.querySelector('.state');
+    if (st) { st.textContent = text; st.dataset.state = kind; }
+  }
+  (async function renderDiagrams() {
+    var figs = Array.prototype.slice.call(document.querySelectorAll('figure.mmd'));
+    if (!figs.length) return;
+    var loaded = false;
+    for (var i = 0; i < CDNS.length && !loaded; i++) {
+      try { await loadScript(CDNS[i]); loaded = !!window.mermaid; } catch (e) { loaded = false; }
+    }
+    if (!loaded) {
+      figs.forEach(function (f) { f.classList.add('off'); setState(f, '离线未渲染 · 下面直接显示 mermaid 源码，可点「复制源码」', 'off'); });
+      return;
+    }
+    var m = window.mermaid;
+    m.initialize({
+      startOnLoad: false, securityLevel: 'loose', theme: 'neutral',
+      fontFamily: '"Microsoft YaHei","SimHei",sans-serif',
+      flowchart: { htmlLabels: true, useMaxWidth: true, curve: 'linear' }
+    });
+    for (var k = 0; k < figs.length; k++) {
+      var fig = figs[k];
+      var stage = fig.querySelector('.stage');
+      var src = fig.querySelector('.mmdsrc');
+      stage.innerHTML = '';
+      try {
+        var out = await m.render('mmdSVG' + (seq++), src.textContent.trim());
+        stage.innerHTML = (typeof out === 'string') ? out : out.svg;
+        setState(fig, '已渲染 · 源码可取', 'ok');
+      } catch (err) {
+        stage.innerHTML = '<pre class="pending">' + src.textContent.replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        }) + '</pre>';
+        setState(fig, '渲染失败：' + ((err && err.message) || err), 'off');
+      }
+    }
+  })();
+
+  var links = Array.prototype.slice.call(document.querySelectorAll('#tocnav a'));
+  var pairs = links.map(function (a) {
+    return { a: a, h: document.getElementById(a.getAttribute('href').slice(1)) };
+  }).filter(function (p) { return !!p.h; });
+
+  var q = document.getElementById('q');
+  if (q) {
+    q.addEventListener('input', function () {
+      var v = q.value.trim().toLowerCase();
+      links.forEach(function (a) {
+        a.parentNode.classList.toggle('hide', v !== '' && a.textContent.toLowerCase().indexOf(v) < 0);
+      });
+    });
+  }
+
+  var tops = [];
+  function measure() { tops = pairs.map(function (p) { return p.h.getBoundingClientRect().top + window.pageYOffset - 80; }); }
+  var navSide = document.querySelector('nav.side');
+  var cur = -1;
+  function setActive(idx) {
+    cur = idx;
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (idx < 0 || !navSide) return;
+    var a = pairs[idx].a;
+    a.classList.add('active');
+    // 只在侧栏自己的滚动条上挪动，绝不碰文档滚动条：
+    // 用 scrollIntoView 会让 Chrome 连带滚动 viewport（nav 是 sticky 的，
+    // 它的可视位置随文档滚动变化，于是形成"跳过去又被拽回目录"的反馈）。
+    var nr = navSide.getBoundingClientRect(), ar = a.getBoundingClientRect();
+    if (ar.top < nr.top + 4) { navSide.scrollTop -= (nr.top + 4 - ar.top); }
+    else if (ar.bottom > nr.bottom - 4) { navSide.scrollTop += (ar.bottom - nr.bottom + 4); }
+  }
+  var suppressUntil = 0;
+  function spy() {
+    if (!tops.length) return;
+    if (Date.now() < suppressUntil) return;
+    var y = window.pageYOffset, idx = -1;
+    for (var i = 0; i < tops.length; i++) { if (tops[i] <= y) { idx = i; } else { break; } }
+    if (idx === cur) return;
+    setActive(idx);
+  }
+  pairs.forEach(function (p) {
+    p.a.addEventListener('click', function () {
+      setActive(pairs.indexOf(p));
+      // html{scroll-behavior:smooth} 让锚点跳转变成一段动画，动画途中的 scroll
+      // 事件会把高亮改到中途经过的章节上，这里先按住 800ms 不跑 spy。
+      suppressUntil = Date.now() + 800;
+    });
+  });
+  var queued = false;
+  window.addEventListener('scroll', function () {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; spy(); });
+  }, { passive: true });
+  window.addEventListener('resize', function () { measure(); spy(); });
+  measure(); spy();
+  window.addEventListener('load', function () { measure(); spy(); });
+
+  var dl = document.getElementById('btn-download');
+  if (dl) {
+    dl.addEventListener('click', function () {
+      var blob = new Blob(['<!DOCTYPE html>\n' + document.documentElement.outerHTML], { type: 'text/html;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = PAGE_NAME;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+      toast('已下载 ' + PAGE_NAME);
+    });
+  }
+  var pr = document.getElementById('btn-print');
+  if (pr) pr.addEventListener('click', function () { window.print(); });
+  var ex = document.getElementById('btn-expand');
+  if (ex) {
+    ex.addEventListener('click', function () {
+      var on = document.body.classList.toggle('showallsrc');
+      ex.classList.toggle('on', on);
+      ex.textContent = on ? '收起全部源码' : '展开全部源码';
+      document.querySelectorAll('figure.mmd').forEach(function (f) { f.classList.toggle('showsrc', on); });
+    });
+  }
+})();
+</script>
+</body>
+</html>

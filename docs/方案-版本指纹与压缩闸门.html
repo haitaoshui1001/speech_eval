@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>演讲评分系统 · 版本指纹与压缩闸门方案</title>
+<style>
+:root{
+  --lh:1.25;                 /* 全文 1.25 倍行距 */
+  --gap:1.5625em;            /* 段间距 = 1.25 倍行距 */
+  --font-head:"SimHei","Heiti SC","Microsoft YaHei","微软雅黑",sans-serif;
+  --font-body:"SimSun","Songti SC","宋体","Microsoft YaHei",serif;
+  --font-mono:"Consolas","JetBrains Mono","Courier New",monospace;
+  --accent:#0f766e; --accent-soft:#e8f4f2; --accent-line:#c3ded9;
+  --ink:#1f2933; --ink-soft:#5b6773; --line:#e2e8ee; --bg:#f7faf9; --panel:#fff;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);
+  font-size:12pt;line-height:var(--lh);-webkit-text-size-adjust:100%}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+header.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.95);
+  border-bottom:1px solid var(--line);backdrop-filter:blur(4px)}
+.topin{max-width:1360px;margin:0 auto;padding:9px 24px;display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+.topin .h{font-family:var(--font-head);font-weight:700;font-size:13pt;letter-spacing:.4px}
+.topin .sub{color:var(--ink-soft);font-size:10pt}
+.topin .tools{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-family:var(--font-body);font-size:10pt;line-height:1.5;padding:3px 9px;
+  border:1px solid var(--accent-line);background:#fff;color:var(--accent);border-radius:4px;cursor:pointer}
+.btn:hover{background:var(--accent-soft);text-decoration:none}
+.btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ghost{border-color:var(--line);color:var(--ink-soft)}
+
+.layout{max-width:1360px;margin:0 auto;padding:0 24px 60px;display:grid;
+  grid-template-columns:302px minmax(0,1fr);gap:30px;align-items:start}
+nav.side{position:sticky;top:50px;max-height:calc(100vh - 50px);overflow:auto;scroll-behavior:auto;padding:18px 6px 40px}
+nav.side .navtitle{font-family:var(--font-head);font-weight:700;font-size:11.5pt;margin:0 0 8px}
+nav.side .navswitch{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap}
+nav.side .search{margin:0 0 10px}
+nav.side input{width:100%;font-family:var(--font-body);font-size:10pt;padding:5px 8px;
+  border:1px solid var(--line);border-radius:4px;background:#fff}
+ul.toclist{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+ul.toclist li{margin:0}
+ul.toclist li a{display:block;padding:4px 8px;margin-left:-2px;border-left:2px solid transparent;
+  color:var(--ink-soft);font-size:10pt;line-height:1.3}
+ul.toclist li.l2>a{font-family:var(--font-head);font-size:10.5pt;color:var(--ink)}
+ul.toclist li.l3>a{padding-left:20px}
+ul.toclist li.l4>a{padding-left:36px;font-size:9.5pt}
+ul.toclist li a:hover{background:var(--accent-soft);color:var(--accent);text-decoration:none}
+ul.toclist li a.active{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent);font-weight:700}
+ul.toclist li.hide{display:none}
+
+main{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:30px 40px 54px}
+p.kicker{color:var(--ink-soft);font-size:9.5pt;margin:0 0 22px;text-indent:0;
+  padding-bottom:10px;border-bottom:1px dashed var(--line)}
+
+h1,h2,h3,h4,h5,h6{font-family:var(--font-head);font-weight:700;line-height:var(--lh);
+  margin:0 0 .55em;text-indent:0;padding:0;color:var(--ink);scroll-margin-top:64px;text-align:left}
+h1{font-size:26pt;margin-bottom:.4em;padding-bottom:.25em;border-bottom:3px solid var(--accent)}
+h2{font-size:18pt;margin-top:1.9em;padding-bottom:.15em;border-bottom:1px solid var(--accent-line)}
+h3{font-size:16pt;margin-top:1.5em}
+h4{font-size:15pt;margin-top:1.3em}
+h5{font-size:14pt;margin-top:1.2em}
+h6{font-size:12pt;margin-top:1.2em}
+
+article p{margin:0 0 var(--gap);text-indent:2em}
+article li p,article td p,article th p,article blockquote p,p.kicker{text-indent:0}
+article ul,article ol{margin:0 0 var(--gap);padding-left:2.4em}
+article li{margin:0 0 .28em}
+article blockquote{margin:0 0 var(--gap);padding:.7em 1em;background:var(--accent-soft);
+  border-left:4px solid var(--accent);border-radius:0 6px 6px 0}
+article hr{border:0;border-top:1px solid var(--line);margin:1.8em 0}
+article strong{font-family:var(--font-head)}
+del{color:#9aa5b1}
+code{font-family:var(--font-mono);font-size:.92em;background:#f1f4f5;border:1px solid #e3e9eb;
+  border-radius:3px;padding:.02em .28em;color:#0b5f57}
+table{border-collapse:collapse;width:100%;margin:0 0 var(--gap);font-size:10.5pt;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top;line-height:1.3}
+th{background:#f2f6f5;font-family:var(--font-head);white-space:nowrap}
+tbody tr:nth-child(even){background:#fbfdfd}
+
+.codeline,figure.mmd{margin:0 0 var(--gap);border:1px solid var(--line);border-radius:6px;background:#fff;overflow:hidden}
+.bar{display:flex;align-items:center;gap:8px;padding:4px 10px;background:#f4f7f7;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.chip{font-family:var(--font-mono);font-size:8.5pt;color:var(--ink-soft);letter-spacing:.6px;text-transform:uppercase}
+.state{font-size:9pt;color:var(--ink-soft)}
+.state[data-state="ok"]{color:#0f766e}
+.state[data-state="off"]{color:#9a5b00}
+.bar .btn{margin-left:0}
+.bar .cp-btn{margin-left:auto}
+.codeslot{overflow:hidden}
+.codehilite{background:#fcfdfd}
+.codehilite pre,.pending,.mmdsrc{margin:0;padding:12px 14px;font-family:var(--font-mono);
+  font-size:10pt;line-height:1.5;overflow-x:auto;white-space:pre;background:#fcfdfd}
+.pending{font-family:var(--font-mono);font-size:10pt;color:var(--ink-soft);text-align:left}
+figure.mmd .stage{padding:16px;overflow-x:auto;text-align:center;min-height:40px}
+figure.mmd .stage svg{max-width:100%;height:auto}
+figure.mmd .stage .pending{background:#fff}
+figure.mmd.off .stage{display:none}
+figure.mmd .mmdsrc{display:none;border-top:1px solid var(--line);background:#fbfcfc;text-align:left}
+figure.mmd.off .mmdsrc,figure.mmd.showsrc .mmdsrc{display:block}
+
+.pagefoot{max-width:1360px;margin:0 auto;padding:0 24px;color:var(--ink-soft);font-size:9.5pt}
+.toast{position:fixed;right:18px;bottom:18px;z-index:60;background:var(--ink);color:#fff;font-size:10pt;
+  padding:8px 14px;border-radius:6px;opacity:0;transition:opacity .18s;pointer-events:none}
+.toast.show{opacity:.94}
+
+@media (max-width:1080px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:0}
+  nav.side{position:static;max-height:none;padding-bottom:14px;border-bottom:1px solid var(--line)}
+  main{border-radius:0;border-left:0;border-right:0}
+  .topin .tools{margin-left:0;width:100%}
+}
+@media print{
+  header.top,nav.side,.pagefoot,.bar,.toast{display:none!important}
+  body{background:#fff;font-size:10.5pt}
+  .layout{display:block;max-width:none;padding:0}
+  main{border:0;padding:0;border-radius:0}
+  h2{break-after:avoid}
+  figure.mmd,.codeline,table{break-inside:avoid}
+}
+
+pre { line-height: 125%; }
+td.linenos .normal { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+.codehilite .hll { background-color: #ffffcc }
+.codehilite { background: #f8f8f8; }
+.codehilite .c { color: #3D7B7B; font-style: italic } /* Comment */
+.codehilite .err { border: 1px solid #FF0000 } /* Error */
+.codehilite .k { color: #008000; font-weight: bold } /* Keyword */
+.codehilite .o { color: #666666 } /* Operator */
+.codehilite .ch { color: #3D7B7B; font-style: italic } /* Comment.Hashbang */
+.codehilite .cm { color: #3D7B7B; font-style: italic } /* Comment.Multiline */
+.codehilite .cp { color: #9C6500 } /* Comment.Preproc */
+.codehilite .cpf { color: #3D7B7B; font-style: italic } /* Comment.PreprocFile */
+.codehilite .c1 { color: #3D7B7B; font-style: italic } /* Comment.Single */
+.codehilite .cs { color: #3D7B7B; font-style: italic } /* Comment.Special */
+.codehilite .gd { color: #A00000 } /* Generic.Deleted */
+.codehilite .ge { font-style: italic } /* Generic.Emph */
+.codehilite .gr { color: #E40000 } /* Generic.Error */
+.codehilite .gh { color: #000080; font-weight: bold } /* Generic.Heading */
+.codehilite .gi { color: #008400 } /* Generic.Inserted */
+.codehilite .go { color: #717171 } /* Generic.Output */
+.codehilite .gp { color: #000080; font-weight: bold } /* Generic.Prompt */
+.codehilite .gs { font-weight: bold } /* Generic.Strong */
+.codehilite .gu { color: #800080; font-weight: bold } /* Generic.Subheading */
+.codehilite .gt { color: #0044DD } /* Generic.Traceback */
+.codehilite .kc { color: #008000; font-weight: bold } /* Keyword.Constant */
+.codehilite .kd { color: #008000; font-weight: bold } /* Keyword.Declaration */
+.codehilite .kn { color: #008000; font-weight: bold } /* Keyword.Namespace */
+.codehilite .kp { color: #008000 } /* Keyword.Pseudo */
+.codehilite .kr { color: #008000; font-weight: bold } /* Keyword.Reserved */
+.codehilite .kt { color: #B00040 } /* Keyword.Type */
+.codehilite .m { color: #666666 } /* Literal.Number */
+.codehilite .s { color: #BA2121 } /* Literal.String */
+.codehilite .na { color: #687822 } /* Name.Attribute */
+.codehilite .nb { color: #008000 } /* Name.Builtin */
+.codehilite .nc { color: #0000FF; font-weight: bold } /* Name.Class */
+.codehilite .no { color: #880000 } /* Name.Constant */
+.codehilite .nd { color: #AA22FF } /* Name.Decorator */
+.codehilite .ni { color: #717171; font-weight: bold } /* Name.Entity */
+.codehilite .ne { color: #CB3F38; font-weight: bold } /* Name.Exception */
+.codehilite .nf { color: #0000FF } /* Name.Function */
+.codehilite .nl { color: #767600 } /* Name.Label */
+.codehilite .nn { color: #0000FF; font-weight: bold } /* Name.Namespace */
+.codehilite .nt { color: #008000; font-weight: bold } /* Name.Tag */
+.codehilite .nv { color: #19177C } /* Name.Variable */
+.codehilite .ow { color: #AA22FF; font-weight: bold } /* Operator.Word */
+.codehilite .w { color: #bbbbbb } /* Text.Whitespace */
+.codehilite .mb { color: #666666 } /* Literal.Number.Bin */
+.codehilite .mf { color: #666666 } /* Literal.Number.Float */
+.codehilite .mh { color: #666666 } /* Literal.Number.Hex */
+.codehilite .mi { color: #666666 } /* Literal.Number.Integer */
+.codehilite .mo { color: #666666 } /* Literal.Number.Oct */
+.codehilite .sa { color: #BA2121 } /* Literal.String.Affix */
+.codehilite .sb { color: #BA2121 } /* Literal.String.Backtick */
+.codehilite .sc { color: #BA2121 } /* Literal.String.Char */
+.codehilite .dl { color: #BA2121 } /* Literal.String.Delimiter */
+.codehilite .sd { color: #BA2121; font-style: italic } /* Literal.String.Doc */
+.codehilite .s2 { color: #BA2121 } /* Literal.String.Double */
+.codehilite .se { color: #AA5D1F; font-weight: bold } /* Literal.String.Escape */
+.codehilite .sh { color: #BA2121 } /* Literal.String.Heredoc */
+.codehilite .si { color: #A45A77; font-weight: bold } /* Literal.String.Interpol */
+.codehilite .sx { color: #008000 } /* Literal.String.Other */
+.codehilite .sr { color: #A45A77 } /* Literal.String.Regex */
+.codehilite .s1 { color: #BA2121 } /* Literal.String.Single */
+.codehilite .ss { color: #19177C } /* Literal.String.Symbol */
+.codehilite .bp { color: #008000 } /* Name.Builtin.Pseudo */
+.codehilite .fm { color: #0000FF } /* Name.Function.Magic */
+.codehilite .vc { color: #19177C } /* Name.Variable.Class */
+.codehilite .vg { color: #19177C } /* Name.Variable.Global */
+.codehilite .vi { color: #19177C } /* Name.Variable.Instance */
+.codehilite .vm { color: #19177C } /* Name.Variable.Magic */
+.codehilite .il { color: #666666 } /* Literal.Number.Integer.Long */
+body.showallsrc figure.mmd .mmdsrc{display:block}
+</style>
+</head>
+<body>
+<header class="top"><div class="topin">
+  <span class="h">演讲评分系统 · 版本指纹与压缩闸门方案</span><span class="sub">待决策：发布链路版本防呆 + 长视频压缩可行性闸门</span>
+  <span class="tools">
+    <button type="button" class="btn" id="btn-download">下载本页 HTML</button>
+    <button type="button" class="btn ghost" id="btn-expand">展开全部源码</button>
+    <a class="btn ghost" href="演讲评分系统-文档包-20260928.zip" download="演讲评分系统-文档包-20260928.zip">打包下载（5 份 HTML）</a>
+    <button type="button" class="btn ghost" id="btn-print">打印 / 存 PDF</button>
+  </span>
+</div></header>
+
+<div class="layout">
+  <nav class="side" aria-label="目录">
+    <div class="navswitch"><a class="btn ghost" href="项目建议书与方案报告.html">项目建议书</a> <a class="btn ghost" href="设计报告.html">设计报告</a> <a class="btn ghost" href="部署手册.html">部署手册</a> <a class="btn on" href="方案-版本指纹与压缩闸门.html">方案·版本与闸门</a> <a class="btn ghost" href="方案-文字稿纠错与朗读合成.html">方案·改稿与朗读</a></div>
+    <p class="navtitle">目录</p>
+    <div class="search"><input id="q" type="search" placeholder="筛选目录…" aria-label="筛选目录"></div>
+    <div id="tocnav"><ul class="toclist">
+<li class="l2"><a href="#1-结论先行" title="1. 结论先行">1. 结论先行</a></li>
+<li class="l3"><a href="#11-调研发现的两个问题" title="1.1 调研发现的两个问题">1.1 调研发现的两个问题</a></li>
+<li class="l3"><a href="#12-三条硬结论" title="1.2 三条硬结论">1.2 三条硬结论</a></li>
+<li class="l3"><a href="#13-需要拍板的两个决策点" title="1.3 需要拍板的两个决策点">1.3 需要拍板的两个决策点</a></li>
+<li class="l2"><a href="#2-调研证据" title="2. 调研证据">2. 调研证据</a></li>
+<li class="l3"><a href="#21-版本漂移链路" title="2.1 版本漂移链路">2.1 版本漂移链路</a></li>
+<li class="l3"><a href="#22-压缩可行性的量化分析" title="2.2 压缩可行性的量化分析">2.2 压缩可行性的量化分析</a></li>
+<li class="l3"><a href="#23-失败路径的真实行为（一处修正）" title="2.3 失败路径的真实行为（一处修正）">2.3 失败路径的真实行为（一处修正）</a></li>
+<li class="l2"><a href="#3-a-线-·-版本指纹防呆" title="3. A 线 · 版本指纹防呆">3. A 线 · 版本指纹防呆</a></li>
+<li class="l3"><a href="#31-设计" title="3.1 设计">3.1 设计</a></li>
+<li class="l3"><a href="#32-改动清单与测试" title="3.2 改动清单与测试">3.2 改动清单与测试</a></li>
+<li class="l3"><a href="#33-备选方案" title="3.3 备选方案">3.3 备选方案</a></li>
+<li class="l2"><a href="#4-b-线-·-压缩可行性闸门" title="4. B 线 · 压缩可行性闸门">4. B 线 · 压缩可行性闸门</a></li>
+<li class="l3"><a href="#41-判定逻辑" title="4.1 判定逻辑">4.1 判定逻辑</a></li>
+<li class="l3"><a href="#42-改动清单与测试" title="4.2 改动清单与测试">4.2 改动清单与测试</a></li>
+<li class="l3"><a href="#43-备选方案" title="4.3 备选方案">4.3 备选方案</a></li>
+<li class="l2"><a href="#5-实施顺序与云端发布" title="5. 实施顺序与云端发布">5. 实施顺序与云端发布</a></li>
+<li class="l2"><a href="#6-明确不做的事与风险" title="6. 明确不做的事与风险">6. 明确不做的事与风险</a></li>
+</ul></div>
+  </nav>
+  <main><article>
+    <p class="kicker">源文件 <code>docs/方案-版本指纹与压缩闸门.md</code> · 生成于 2026-09-29 14:49</p>
+<h1 id="演讲视频评价系统-·-版本指纹与压缩闸门方案">演讲视频评价系统 · 版本指纹与压缩闸门方案</h1>
+<h2 id="1-结论先行">1. 结论先行</h2>
+<h3 id="11-调研发现的两个问题">1.1 调研发现的两个问题</h3>
+<p><strong>问题一：版本漂移。</strong> 压缩功能已于 <code>ec9157e</code> 提交并推送到 <code>origin/main</code>，181 条自测全绿；但云端在跑的发布包 <code>speech-assist-20260923.tar.gz</code> 里根本没有 <code>app/compress.py</code>（与本次重出的新包逐文件比对，唯一差异就是它）。git、发布包、云端三者之间没有任何一处能回答"线上现在是哪个版本"。重出新包只是止血，不是防呆。</p>
+<p><strong>问题二：固定 50 MB 目标与长视频存在物理矛盾。</strong> 压缩器按"目标体积 ÷ 时长"反推码率，时长越长摊到的码率越低。调研用现有代码（<code>pick_plan</code> 纯函数）跑表，得出下面这组数字。这不是 bug——是缺一个"提前告诉用户压不下"的闸门。</p>
+<h3 id="12-三条硬结论">1.2 三条硬结论</h3>
+<p><strong>结论一：50 MB 装不下 34 分钟以上的视频。</strong>
+视频码率有 100 kbps 的硬地板（<code>_MIN_VIDEO_KBPS</code>），加上 96 kbps 音轨，总码率最低 196 kbps。按 <code>HEADROOM=0.95</code> 反推，50 MB 目标的物理时长上限正好是 <strong>33.9 分钟</strong>。上传上限 200 MB 对应约 135 分钟，所以"能上传但压不进 50 MB"的区间是 <strong>34–135 分钟</strong>，这个区间足够宽，一定会被人踩到。</p>
+<blockquote>
+<p><strong>实现偏差（已按此实施并自测全绿）</strong>：闸门的"装不下"判据不带 <code>HEADROOM</code>——5% 余量是留给容器开销的，不是"能不能压"的分界（视频码率反正会被夹到 100 kbps 地板），并按 1 MB = 1024×1024 字节换算。因此 50 MB 目标的实际拦截线是 <strong>35.6 分钟</strong>（无声轨约 69.9 分钟、200 MB 约 142 分钟）。33.9–35.6 分钟之间按"勉强装得下"放行，由第三题的 bpp 告警负责留痕，而不是拦。</p>
+</blockquote>
+<p><strong>结论二：画质在 15 分钟就开始失守。</strong>
+保真判据是每像素每比特 <code>bpp ≥ MIN_BPP(0.03)</code>，掉到 480p 为止（<code>LADDER</code> 末档）。保住 480p 所需的最小目标体积随时长线性增长：</p>
+<table>
+<thead>
+<tr>
+<th>时长</th>
+<th>保 480p</th>
+<th>保 540p</th>
+<th>保 720p</th>
+<th>保原生 1080p</th>
+<th>每分钟系数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5 分钟</td>
+<td>7 MB</td>
+<td>8 MB</td>
+<td>12 MB</td>
+<td>22 MB</td>
+<td>480p 1.45</td>
+</tr>
+<tr>
+<td>10 分钟</td>
+<td>15 MB</td>
+<td>16 MB</td>
+<td>24 MB</td>
+<td>44 MB</td>
+<td>540p 1.65</td>
+</tr>
+<tr>
+<td>15 分钟</td>
+<td>22 MB</td>
+<td>25 MB</td>
+<td>36 MB</td>
+<td>66 MB</td>
+<td>720p 2.38</td>
+</tr>
+<tr>
+<td>20 分钟</td>
+<td>29 MB</td>
+<td>33 MB</td>
+<td>47 MB</td>
+<td>88 MB</td>
+<td>1080p 4.40</td>
+</tr>
+<tr>
+<td>30 分钟</td>
+<td>44 MB</td>
+<td>49 MB</td>
+<td>71 MB</td>
+<td>133 MB</td>
+<td>—</td>
+</tr>
+<tr>
+<td>45 分钟</td>
+<td>65 MB</td>
+<td>74 MB</td>
+<td>107 MB</td>
+<td>199 MB</td>
+<td>—</td>
+</tr>
+<tr>
+<td>60 分钟</td>
+<td>87 MB</td>
+<td>99 MB</td>
+<td>142 MB</td>
+<td>265 MB</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>对照当前 50 MB 目标（1080p 素材、25fps）：</p>
+<table>
+<thead>
+<tr>
+<th>时长</th>
+<th>落档</th>
+<th>bpp</th>
+<th>观感判断</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2 分钟</td>
+<td>原生 1080p</td>
+<td>.062</td>
+<td>良好</td>
+</tr>
+<tr>
+<td>5 分钟</td>
+<td>720p</td>
+<td>.054</td>
+<td>良好</td>
+</tr>
+<tr>
+<td>10 分钟</td>
+<td>540p</td>
+<td>.044</td>
+<td>可接受</td>
+</tr>
+<tr>
+<td>15 分钟</td>
+<td>480p</td>
+<td>.034</td>
+<td>触底</td>
+</tr>
+<tr>
+<td>20 分钟</td>
+<td>480p</td>
+<td>.023</td>
+<td>已破地板，PPT 文字边缘开始出块</td>
+</tr>
+<tr>
+<td>30 分钟</td>
+<td>480p</td>
+<td>.012</td>
+<td>明显糊</td>
+</tr>
+<tr>
+<td>45 分钟</td>
+<td>480p 100kbps 封底</td>
+<td>.010</td>
+<td>不可用</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论三：超过约 25 分钟的 1080p 素材，会被"压缩超时"误杀。</strong>
+2 vCPU 服务器实测折算约 80 秒/分钟素材（每遍，<code>PRESET=veryfast</code>），每遍超时上限 <code>COMPRESS_TIMEOUT=1800</code> 秒：</p>
+<table>
+<thead>
+<tr>
+<th>素材时长</th>
+<th>单遍耗时</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10 分钟</td>
+<td>800 秒</td>
+<td>正常</td>
+</tr>
+<tr>
+<td>15 分钟</td>
+<td>1200 秒</td>
+<td>单遍正常</td>
+</tr>
+<tr>
+<td>20 分钟</td>
+<td>1600 秒</td>
+<td>单遍正常</td>
+</tr>
+<tr>
+<td>22 分钟</td>
+<td>1760 秒</td>
+<td>逼近上限</td>
+</tr>
+<tr>
+<td>25 分钟</td>
+<td>2000 秒</td>
+<td><strong>第一遍就被杀</strong>，报"压缩超时"</td>
+</tr>
+<tr>
+<td>30 分钟</td>
+<td>2400 秒</td>
+<td>同上</td>
+</tr>
+</tbody>
+</table>
+<p>后果：34 分钟以上的素材，用户看到的错误是"压缩超时，可调大超时后重试"，而真实原因是"50 MB 装不下"。调大超时只会让人多烧一遍 CPU，最后仍然失败。<strong>错误信息把用户往修不好的方向引</strong>。</p>
+<blockquote>
+<p><strong>实现偏差</strong>：闸门用的是同一个 80 秒/分钟系数、按<strong>单遍</strong>与 <code>COMPRESS_TIMEOUT</code> 比较，默认 1800 秒下约 <strong>22.5 分钟</strong>即在启动 ffmpeg <strong>之前</strong>主动拦截。上表"22 分钟逼近上限、25 分钟被杀"两行在新实现里变成"开压前就被拦下"——误杀叙事不复存在，错误文案直接给出所需超时（1.25 倍向上取整到百秒，且不超过 21600 秒上限）或剪辑分段的出路，原文件保持不动。</p>
+</blockquote>
+<h3 id="13-需要拍板的两个决策点">1.3 需要拍板的两个决策点</h3>
+<table>
+<thead>
+<tr>
+<th>决策</th>
+<th>选项</th>
+<th>推荐</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A 线版本指纹要做到哪一层</td>
+<td>① 仅打包时写 <code>BUILD_INFO.json</code>（不产生提交）② 再加 <code>commit + push</code> 后的 tag</td>
+<td>①。仓库是 public，且 <code>commit→打包→上云→验收→push</code> 的既有闭环里，打包发生在 push 之前，不能依赖 tag</td>
+</tr>
+<tr>
+<td>B 线闸门命中不可行时的动作</td>
+<td>① 直接失败并给出可操作提示 ② 自动抬升目标后继续压缩并在报告留痕</td>
+<td>①为主、②留开关。自动改目标会改变用户显式设置过的配额预期（<code>COMPRESS_TARGET_MB</code> 可被 <code>.env</code>/设置页覆盖），静默抬升风险大于收益</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-调研证据">2. 调研证据</h2>
+<h3 id="21-版本漂移链路">2.1 版本漂移链路</h3>
+<p>三处代码位置共同解释了"为什么没被发现"：</p>
+<ul>
+<li><code>deploy/package.ps1</code>：白名单打包 + 泄密断言 + LF 归一 + 回环校验，流程很扎实，但<strong>全包内没有任何版本标识</strong>（无 git SHA、无构建时间、无来源分支）。</li>
+<li><code>app/main.py</code> 的 <code>_health_payload</code>（<a href="file:///d:/heyun/speech_assist/app/main.py#L993-L1017">main.py:L993-L1017</a>）：已返回 <code>compress_target_mb</code>、<code>compress_timeout</code>、<code>rubric</code> 版本、模型名、并发与 token 用量，<strong>唯独没有代码版本字段</strong>。也就是说 <code>/health</code> 能证明"配置是什么"，不能证明"跑的是哪份代码"。</li>
+<li><code>deploy/update.sh</code>：rsync <code>--delete</code> 升级、重渲染 systemd/nginx、轮询 <code>/health</code> 成功即打印"升级完成"。<strong>它不比对新旧版本</strong>，所以"用旧包升级"和"用新包升级"的输出完全一样。</li>
+</ul>
+<p>链路结论：git 只做备份不参与部署，部署唯一凭据是 tar.gz 文件名里的日期戳。日期戳由人手工传参（<code>-Stamp</code>），一旦忘记重打包，就出现本次这种"日期看着新、内容其实是旧的"。</p>
+<h3 id="22-压缩可行性的量化分析">2.2 压缩可行性的量化分析</h3>
+<p>以上三张表全部由 <code>app/compress.py</code> 的常量与 <code>pick_plan()</code> 直接算出，输入假设为 1080p/25fps 素材，非估算：</p>
+<ul>
+<li><code>budget_bits = target * HEADROOM * 8 / duration</code> → 总码率随时长反比下降</li>
+<li><code>video_kbps = max(_MIN_VIDEO_KBPS, total_kbps - AUDIO_KBPS)</code> → 100 kbps 封顶地板</li>
+<li>档位选择：<code>bpp = video_kbps * 1000 / (w * h * fps)</code>，<code>bpp ≥ 0.03</code> 才保住当前档，最低掉到 480p</li>
+</ul>
+<p>磁盘不是瓶颈：压缩峰值占用 = 原件 + 临时产物 ≤ 200 MB + 50 MB = 250 MB，对 40 GiB 系统盘无压力。所以闸门只需管"能否压进目标"与"能否在超时内跑完"两件事，不需要管容量。</p>
+<h3 id="23-失败路径的真实行为（一处修正）">2.3 失败路径的真实行为（一处修正）</h3>
+<p>先前调研推测"不可行的文件会烧满 4 遍编码（最多 2 小时）才报错"。<strong>这个推测不成立</strong>，逐行核对 <a href="file:///d:/heyun/speech_assist/app/compress.py#L245-L265">compress.py:L245-L265</a> 后修正如下：</p>
+<p>第二轮开始前有 <code>if scaled &gt;= plan.video_kbps - _RETRY_SLACK_KBPS: break</code>。对已经跌到 100 kbps 地板的不可行文件，回调值只比原值低 6 kbps 左右，小于 300 kbps 的重试余量，因此<strong>直接 break，只跑一遍两遍编码（≈2 次单遍）就退出</strong>，随后命中 <code>size &gt; target</code> 抛出"两遍编码后仍有 N MB，未能压到目标"。</p>
+<p>修正后的代价评估：
+- CPU 浪费：约一遍两遍编码（25 分钟素材 ≈ 2×1760 秒），仍是有意义的浪费，但不是 2 小时。
+- 报错质量：这条中文提示本身是准确的，但只有在<strong>没被超时先杀掉</strong>时才有机会抛出。25 分钟以上的素材会先被超时截断，用户永远看不到"目标装不下"这个真因。</p>
+<p>这恰恰强化了闸门的价值：<strong>把"必然失败/必然糊"的判断从编码之后挪到编码之前</strong>，既省 CPU，又让错误信息说人话。</p>
+<hr />
+<h2 id="3-a-线-·-版本指纹防呆">3. A 线 · 版本指纹防呆</h2>
+<h3 id="31-设计">3.1 设计</h3>
+<p>打包时生成一份不进 git 的构建指纹，随包上云，运行期从 <code>/health</code> 读出，升级时前后对比。</p>
+<figure class="mmd"><div class="bar"><span class="chip">mermaid 流程图</span><span class="state" data-state="wait">等待渲染…</span><button type="button" class="btn mmd-btn" data-target="mmd-1">取 mermaid 源码</button><button type="button" class="btn cp-btn" data-target="mmd-1">复制源码</button><button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button><button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button><button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div><div class="stage" id="stage-1"><pre class="pending">flowchart LR
+  A[&quot;package.ps1&lt;br/&gt;git rev-parse HEAD&quot;] --&gt; B[&quot;包内 BUILD_INFO.json&lt;br/&gt;sha · branch · dirty · built_at&quot;]
+  B --&gt; C[&quot;云端 /root/speech-assist/BUILD_INFO.json&quot;]
+  C --&gt; D[&quot;app/main.py&lt;br/&gt;/health 返回 version&quot;]
+  D --&gt; E[&quot;update.sh&lt;br/&gt;升级前取旧 version&lt;br/&gt;升级后取新 version&quot;]
+  E --&gt; F[&quot;日志与发布页可见&lt;br/&gt;旧 sha → 新 sha&quot;]</pre></div><pre class="mmdsrc" id="mmd-1" hidden>flowchart LR
+  A[&quot;package.ps1&lt;br/&gt;git rev-parse HEAD&quot;] --&gt; B[&quot;包内 BUILD_INFO.json&lt;br/&gt;sha · branch · dirty · built_at&quot;]
+  B --&gt; C[&quot;云端 /root/speech-assist/BUILD_INFO.json&quot;]
+  C --&gt; D[&quot;app/main.py&lt;br/&gt;/health 返回 version&quot;]
+  D --&gt; E[&quot;update.sh&lt;br/&gt;升级前取旧 version&lt;br/&gt;升级后取新 version&quot;]
+  E --&gt; F[&quot;日志与发布页可见&lt;br/&gt;旧 sha → 新 sha&quot;]</pre></figure>
+<p>关键点：</p>
+<ol>
+<li><code>package.ps1</code> 在打包目录里写入 <code>BUILD_INFO.json</code>，字段为 <code>git_sha</code>（短 7 位 + 全 40 位）、<code>git_branch</code>、<code>dirty</code>（工作区是否干净）、<code>built_at</code>（ISO8601）、<code>package</code>（包名）。取不到 git 时降级为 <code>"unknown"</code>，不阻断打包。</li>
+<li><code>app/main.py</code> 新增只读函数读取该文件（进程级缓存，仿 <code>face_mod.available()</code> 的写法），<code>_health_payload</code> 增加 <code>version</code> 对象。<strong>文件缺失时返回 <code>"unknown"</code> 而不是报错</strong>，这样本地 dev、老包、云上新包三种形态都能自述状态，反而一眼能看出"云端还是旧包"。</li>
+<li><code>update.sh</code> 在 rsync 之前先 <code>curl /health</code> 记下旧 <code>version</code>，重启并轮询成功后打印 <code>旧 &lt;sha&gt; → 新 &lt;sha&gt;</code>；若两者相同则显式告警"新包与云端代码指纹一致，请确认是否打包了旧提交"。这一条直接杜绝本次事故。</li>
+<li><code>package.ps1</code> 增加脏工作区提示：当 <code>app/</code> 或 <code>tests/</code> 有未提交改动时，把 <code>dirty=true</code> 写进包并在打包日志里黄字提醒"正在打包未提交的改动"。不阻断（本地验证时常需要脏打包），但要留痕。</li>
+</ol>
+<h3 id="32-改动清单与测试">3.2 改动清单与测试</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deploy/package.ps1</code></td>
+<td>采集 git 信息、写 <code>BUILD_INFO.json</code>、脏区提示、加入白名单与回环校验</td>
+<td>~30 行</td>
+</tr>
+<tr>
+<td><code>app/buildinfo.py</code>（新增）</td>
+<td>读 <code>BUILD_INFO.json</code>，进程级缓存，异常一律降级 unknown</td>
+<td>~30 行</td>
+</tr>
+<tr>
+<td><code>app/main.py</code></td>
+<td><code>_health_payload</code> 增 <code>version</code> 字段</td>
+<td>~3 行</td>
+</tr>
+<tr>
+<td><code>deploy/update.sh</code></td>
+<td>升级前后各取一次 version 并对比打印</td>
+<td>~15 行</td>
+</tr>
+<tr>
+<td><code>tests/selfcheck.py</code></td>
+<td>断言：无 BUILD_INFO 时 <code>version.git_sha == "unknown"</code>；写入临时文件后能正确读出；<code>/health</code> 载荷含 version</td>
+<td>~25 行</td>
+</tr>
+<tr>
+<td>设计报告 与 部署手册 两份文档</td>
+<td>各补"如何确认线上版本"一节</td>
+<td>文档</td>
+</tr>
+</tbody>
+</table>
+<p>自测基线从 181 条增至约 184–186 条。</p>
+<h3 id="33-备选方案">3.3 备选方案</h3>
+<ul>
+<li><strong>把 SHA 写进代码常量</strong>（如 <code>app/version.py</code>）：需要每次打包产生一次提交，破坏"打包在 push 之前"的闭环顺序，且会产生大量无意义提交。不采用。</li>
+<li><strong>只做 <code>update.sh</code> 比对包内文件哈希</strong>：能防"用了旧包"，但运行期 <code>/health</code> 仍无法回答"线上是哪版"，排障时依旧要登录机器。不采用。</li>
+</ul>
+<hr />
+<h2 id="4-b-线-·-压缩可行性闸门">4. B 线 · 压缩可行性闸门</h2>
+<h3 id="41-判定逻辑">4.1 判定逻辑</h3>
+<p>在 <code>pick_plan()</code> 里（信息最全、且是纯函数，最易单测）加两道前置判断，<strong>不新增配置项也能工作</strong>，新增的 <code>COMPRESS_FEASIBILITY</code> 只用来关闭闸门。</p>
+<blockquote>
+<p><strong>实现偏差</strong>：落地为<strong>三道算术题</strong>（<code>feasibility()</code> 纯函数，<code>pick_plan</code> 开头调用）。实际顺序是 装不下 → 必超时 → 画质破线，与下方流程图的 G2/G3 顺序互换——硬失败先于软告警判断更自然。第三题不拦：<code>quality_note</code> 写入 <code>Result.gate_note</code>，随 <code>note</code> 以"注："前缀进报告。<code>target ≤ 0</code> 或时长未知直接放行，闸门命中不动原文件。</p>
+</blockquote>
+<figure class="mmd"><div class="bar"><span class="chip">mermaid 流程图</span><span class="state" data-state="wait">等待渲染…</span><button type="button" class="btn mmd-btn" data-target="mmd-2">取 mermaid 源码</button><button type="button" class="btn cp-btn" data-target="mmd-2">复制源码</button><button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button><button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button><button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div><div class="stage" id="stage-2"><pre class="pending">flowchart TD
+  S[&quot;probe 得到时长 / 分辨率 / 有无音轨&quot;] --&gt; T[&quot;总码率上限 kbps = 目标x0.95x8/时长/1000&quot;]
+  T --&gt; G1[&quot;总码率低于 196kbps 地板?&quot;]
+  G1 -- 是 --&gt; E1[&quot;立即抛错：目标装不下&lt;br/&gt;给出该时长所需最小目标&quot;]
+  G1 -- 否 --&gt; G2[&quot;480p 下 bpp 低于 0.03?&quot;]
+  G2 -- 是 --&gt; W1[&quot;允许继续，但在 compress_note&lt;br/&gt;写明画质已低于可信阈值&quot;]
+  G2 -- 否 --&gt; G3[&quot;时长x80秒 超过压缩超时上限?&quot;]
+  W1 --&gt; G3
+  G3 -- 是 --&gt; E2[&quot;立即抛错：会超时&lt;br/&gt;提示调大超时或用更短素材&quot;]
+  G3 -- 否 --&gt; OK[&quot;按现有阶梯执行两遍编码&quot;]</pre></div><pre class="mmdsrc" id="mmd-2" hidden>flowchart TD
+  S[&quot;probe 得到时长 / 分辨率 / 有无音轨&quot;] --&gt; T[&quot;总码率上限 kbps = 目标x0.95x8/时长/1000&quot;]
+  T --&gt; G1[&quot;总码率低于 196kbps 地板?&quot;]
+  G1 -- 是 --&gt; E1[&quot;立即抛错：目标装不下&lt;br/&gt;给出该时长所需最小目标&quot;]
+  G1 -- 否 --&gt; G2[&quot;480p 下 bpp 低于 0.03?&quot;]
+  G2 -- 是 --&gt; W1[&quot;允许继续，但在 compress_note&lt;br/&gt;写明画质已低于可信阈值&quot;]
+  G2 -- 否 --&gt; G3[&quot;时长x80秒 超过压缩超时上限?&quot;]
+  W1 --&gt; G3
+  G3 -- 是 --&gt; E2[&quot;立即抛错：会超时&lt;br/&gt;提示调大超时或用更短素材&quot;]
+  G3 -- 否 --&gt; OK[&quot;按现有阶梯执行两遍编码&quot;]</pre></figure>
+<p>三条提示语的具体写法（都要给出数字与出路，不说空话）：</p>
+<ul>
+<li>不可行：<code>50 MB 的目标装不下 40 分钟的视频。按最低可用码率计算，这个时长至少需要 61 MB。建议：剪辑为两段分别上传，或把「压缩目标体积」调到 61 MB 以上。</code></li>
+<li>画质告警（仍会压，只在报告留痕）：<code>已压到 50.0 MB，但时长 25 分钟使 480p 画面的每像素比特数低于 0.03，回放中文字边缘会有可见色块。评分依据是 640px 关键帧，不受影响。</code></li>
+<li>超时预警：<code>这段 30 分钟的视频在两核服务器上单遍编码约需 2400 秒，超过当前 1800 秒的压缩超时上限，必然被中断。建议把「压缩超时」调到 3000 秒，或改传更短的素材。</code></li>
+</ul>
+<p>时长折算系数 <code>80 秒/分钟</code> 从哪来：部署手册 §7 已记录"每分钟 1080p 素材 1~2 分钟（2 vCPU）"，取中偏保守值。实现时写成 <code>compress.ESTIMATED_SECONDS_PER_SOURCE_MINUTE = 80</code>，并在注释里注明是折算系数、来源、以及 720p 素材可更低的说明，避免被当成硬编码魔法数。</p>
+<p><code>needs_compress()</code> 之前不需要动：闸门只在确实要压时才生效，小于目标体积的文件零影响。</p>
+<h3 id="42-改动清单与测试">4.2 改动清单与测试</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/compress.py</code></td>
+<td>新增 <code>feasibility(info, target)</code> 纯函数返回 <code>(action, message)</code>；<code>pick_plan</code> 开头调用；新增折算常量</td>
+<td>~50 行</td>
+</tr>
+<tr>
+<td><code>app/pipeline.py</code></td>
+<td><code>_compress_stage</code> 把闸门的"画质告警"文案并入 <code>notes</code>，与现有 <code>res.note</code> 共存</td>
+<td>~5 行</td>
+</tr>
+<tr>
+<td><code>app/config.py</code></td>
+<td>新增 <code>COMPRESS_FEASIBILITY</code>（默认 <code>on</code>，可 <code>off</code> 退回旧行为），沿用现有 <code>EnvField</code> 四态与 <code>value_source()</code></td>
+<td>~10 行</td>
+</tr>
+<tr>
+<td><code>.env.example</code>、<code>deploy/env.production</code></td>
+<td>补配置项与注释</td>
+<td>文档</td>
+</tr>
+<tr>
+<td><code>tests/selfcheck.py</code></td>
+<td>断言：20 分钟/50MB → 放行且带画质告警；40 分钟/50MB → 抛错且提示所需最小体积；<code>off</code> 时行为与今天一致；<code>target=0</code>（关闭压缩）不触发闸门</td>
+<td>~40 行</td>
+</tr>
+<tr>
+<td>设计报告 与 部署手册 两份文档</td>
+<td>写入三张表与闸门行为</td>
+<td>文档</td>
+</tr>
+</tbody>
+</table>
+<p>自测基线增加约 6–8 条。</p>
+<blockquote>
+<p><strong>实现偏差</strong>：<code>app/pipeline.py</code> 实际<strong>零改动</strong>——画质告警在 <code>compress.py</code> 内部转成 <code>Result.gate_note</code> 并拼进 <code>Result.note</code>，pipeline 照旧透传。<code>feasibility()</code> 签名多了可选参数 <code>timeout</code>（缺省读配置），便于单测注入。A+B 两线合计自测基线 181 → <strong>189</strong>（本线闸门 6 条、A 线版本指纹 2 条），落在预估区间内。</p>
+</blockquote>
+<h3 id="43-备选方案">4.3 备选方案</h3>
+<ul>
+<li><strong>β：自动抬升目标</strong>。按时长自动取 <code>max(用户目标, 该时长保 480p 所需体积)</code>，压完在报告里写明"已自动调整目标"。好处是用户无感、总能出结果；坏处是静默改动了用户显式设置的配额，且 60 分钟素材会被抬到 87 MB，与"50 MB 是为了省 40GB 盘和 3Mbps 带宽"的原始约束冲突。列为后续可选增强，本次不做。</li>
+<li><strong>γ：只加文档与前端文案</strong>，不加代码闸门。成本最低，但 34–135 分钟这个区间靠用户自己算不现实，仍然会产生"传上去等 40 分钟后失败"的差评。不采用。</li>
+<li><strong>前端上传时即时拦截</strong>：浏览器读不到可靠的视频时长（需要 <code>loadedmetadata</code>，且对某些容器不准），且用户可能设置"先传后压"。放在闸门之后作为体验优化，本次不做。</li>
+</ul>
+<hr />
+<h2 id="5-实施顺序与云端发布">5. 实施顺序与云端发布</h2>
+<p>推荐顺序（每步都可独立回退）：</p>
+<ol>
+<li><strong>先上 0924 包</strong>（含压缩功能，已完成打包与文档重出，等你执行）。这一步与 A/B 两线无关，是当前最紧的止血。</li>
+<li><strong>A 线</strong>（约半天）。改动集中在 <code>package.ps1</code>/<code>update.sh</code>/新增 <code>buildinfo.py</code>，对运行时行为零影响，风险最低，先拿到"能证明线上是哪版"的能力。</li>
+<li><strong>B 线</strong>（约半天）。有量化闸门，改完必须回到 <code>LLM_MODE=mock</code> 跑全量自测，再用真实长视频做一次端到端。</li>
+<li>A+B 合入后重打包为 <code>speech-assist-20260928.tar.gz</code>，此时 <code>/health</code> 里已带 version，第 1 步的手工命令即可复用。</li>
+</ol>
+<p>云端需要你手动执行（服务器仅密码认证，我无凭据）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-1">复制代码</button></div><div class="codeslot" id="code-1"><div class="codehilite"><pre><span></span>scp<span class="w"> </span>dist/speech-assist-20260928.tar.gz<span class="w"> </span>root@&lt;公网IP&gt;:/root/
+ssh<span class="w"> </span>root@&lt;公网IP&gt;
+<span class="nb">cd</span><span class="w"> </span>/root<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>tar<span class="w"> </span>xzf<span class="w"> </span>speech-assist-20260928.tar.gz
+sudo<span class="w"> </span>bash<span class="w"> </span>speech-assist-20260928/deploy/update.sh<span class="w"> </span>speech-assist-20260928
+curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8000/health
+</pre></div></div></div>
+<p>A 线上线后的验收方式：<code>curl -s http://127.0.0.1:8000/health</code> 里出现 <code>version</code> 字段；升级日志末尾出现"旧 sha → 新 sha"。
+B 线上线后的验收方式：上传一段 40 分钟的录屏（或临时把 <code>COMPRESS_TARGET_MB</code> 调小到 5 复现），应在排队阶段就收到中文提示，而不是等几十分钟失败。</p>
+<hr />
+<h2 id="6-明确不做的事与风险">6. 明确不做的事与风险</h2>
+<ul>
+<li><strong>不动评价逻辑</strong>：闸门只影响"要不要压、能不能压"，压缩本身不影响评分输入（评分只取 640px 关键帧，<code>Result.note</code> 里已有这句结论）。</li>
+<li><strong>不引入对象存储/COS</strong>：仓库内确认无任何 COS/STS 代码，本方案不假设该方向。</li>
+<li><strong>不改上传上限</strong>：<code>MAX_VIDEO_MB</code> 保持 200 MB，闸门是在这个前提下计算 34–135 分钟的风险区间。</li>
+<li><strong>风险一</strong>：80 秒/分钟是折算值，真实素材（720p 手机录屏）会显著更快，闸门可能对短边较低的素材过严。缓解：把闸门 E2 只作为<strong>预警+可调</strong>，<code>COMPRESS_TIMEOUT</code> 设 0 即完全不限时，且提示语明确告知调大超时的出路。</li>
+</ul>
+<blockquote>
+<p><strong>实现偏差</strong>：本条缓解措施按实现更正——<code>COMPRESS_TIMEOUT</code> <strong>不能设 0 来解除必超时判断</strong>：设置页校验下限 60 秒，闸门内部亦按 <code>max(60, timeout)</code> 兜底（设 0 反而会把几乎所有素材拦下）。正确的放宽方式是 <code>COMPRESS_FEASIBILITY=0</code> 整体退回旧行为（不做任何前置判断，跑到哪算哪），这一点已写进 <code>.env</code> 模板注释与两份手册的排障表。
+- <strong>风险二</strong>：新增 <code>version</code> 字段可能被下游脚本按固定 JSON 结构解析。现状是 <code>/health</code> 仅由 <code>update.sh</code> 与人工使用，且只增加字段不改语义，向后兼容。
+- <strong>待你表态的遗留项</strong>：<code>dist/</code> 下三个历史发布包是否清理。建议保留最新两个，其余删除，避免日后又拿错包。
+- <strong>文档闭环</strong>：本方案获批实施后，需要在设计报告里新增"如何确认线上版本"与"压缩时长与体积的对应关系"两节，并在部署手册的排障表里加一行"压缩失败先查时长与目标体积是否匹配"。设计报告现有发布流程一节也要补上"打包即写指纹"这一步。</p>
+</blockquote>
+  </article></main>
+</div>
+
+<p class="pagefoot">本页由 <code>tools/build_html.py</code> 从 Markdown 源生成。改内容请改 <code>.md</code> 后重新生成，不要直接编辑 HTML。</p>
+<script>
+(function () {
+  var PAGE_NAME = "方案-版本指纹与压缩闸门.html";
+  var seq = 0;
+
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._h);
+    t._h = setTimeout(function () { t.classList.remove('show'); }, 2200);
+  }
+
+  function copyText(text, label) {
+    function legacy() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.readOnly = true;
+      ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      toast(ok ? label + '已复制' : '复制失败，请手动选中');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(label + '已复制'); }, legacy);
+    } else { legacy(); }
+  }
+
+  function textOf(id) {
+    var el = document.getElementById(id);
+    if (!el) return '';
+    var pre = el.tagName === 'PRE' ? el : (el.querySelector('pre') || el);
+    return pre.innerText.replace(/\s+$/, '');
+  }
+
+  document.querySelectorAll('.cp-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      copyText(textOf(b.dataset.target), b.textContent.indexOf('源码') >= 0 ? 'mermaid 源码' : '代码');
+    });
+  });
+
+  document.querySelectorAll('.mmd-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var src = document.getElementById(b.dataset.target);
+      if (!src) return;
+      var fig = src.closest('figure.mmd');
+      var open = !fig.classList.contains('showsrc');
+      fig.classList.toggle('showsrc', open);
+      b.classList.toggle('on', open);
+      b.textContent = open ? '收起 mermaid 源码' : '取 mermaid 源码';
+    });
+  });
+
+  function zoomFig(fig, act) {
+    var svg = fig.querySelector('.stage svg');
+    if (!svg) return;
+    if (!fig.dataset.base) {
+      var w = Math.round(svg.getBoundingClientRect().width);
+      fig.dataset.base = String(w > 0 ? w : 640);
+    }
+    var z = parseFloat(fig.dataset.zoom || '1');
+    if (act === 'in') z = Math.min(3, Math.round((z + 0.25) * 100) / 100);
+    else if (act === 'out') z = Math.max(0.5, Math.round((z - 0.25) * 100) / 100);
+    else z = 1;
+    fig.dataset.zoom = String(z);
+    if (z === 1) { svg.style.maxWidth = ''; svg.style.width = ''; }
+    else { svg.style.maxWidth = 'none'; svg.style.width = (parseFloat(fig.dataset.base) * z) + 'px'; }
+    setState(fig, z === 1 ? '已渲染 · 源码可取' : '缩放 ' + Math.round(z * 100) + '%', z === 1 ? 'ok' : 'wait');
+  }
+  document.querySelectorAll('.z-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var fig = b.closest('figure.mmd');
+      if (fig) zoomFig(fig, b.dataset.act);
+    });
+  });
+
+  var CDNS = [
+    'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js',
+    'https://unpkg.com/mermaid@11/dist/mermaid.min.js'
+  ];
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  function setState(fig, text, kind) {
+    var st = fig.querySelector('.state');
+    if (st) { st.textContent = text; st.dataset.state = kind; }
+  }
+  (async function renderDiagrams() {
+    var figs = Array.prototype.slice.call(document.querySelectorAll('figure.mmd'));
+    if (!figs.length) return;
+    var loaded = false;
+    for (var i = 0; i < CDNS.length && !loaded; i++) {
+      try { await loadScript(CDNS[i]); loaded = !!window.mermaid; } catch (e) { loaded = false; }
+    }
+    if (!loaded) {
+      figs.forEach(function (f) { f.classList.add('off'); setState(f, '离线未渲染 · 下面直接显示 mermaid 源码，可点「复制源码」', 'off'); });
+      return;
+    }
+    var m = window.mermaid;
+    m.initialize({
+      startOnLoad: false, securityLevel: 'loose', theme: 'neutral',
+      fontFamily: '"Microsoft YaHei","SimHei",sans-serif',
+      flowchart: { htmlLabels: true, useMaxWidth: true, curve: 'linear' }
+    });
+    for (var k = 0; k < figs.length; k++) {
+      var fig = figs[k];
+      var stage = fig.querySelector('.stage');
+      var src = fig.querySelector('.mmdsrc');
+      stage.innerHTML = '';
+      try {
+        var out = await m.render('mmdSVG' + (seq++), src.textContent.trim());
+        stage.innerHTML = (typeof out === 'string') ? out : out.svg;
+        setState(fig, '已渲染 · 源码可取', 'ok');
+      } catch (err) {
+        stage.innerHTML = '<pre class="pending">' + src.textContent.replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        }) + '</pre>';
+        setState(fig, '渲染失败：' + ((err && err.message) || err), 'off');
+      }
+    }
+  })();
+
+  var links = Array.prototype.slice.call(document.querySelectorAll('#tocnav a'));
+  var pairs = links.map(function (a) {
+    return { a: a, h: document.getElementById(a.getAttribute('href').slice(1)) };
+  }).filter(function (p) { return !!p.h; });
+
+  var q = document.getElementById('q');
+  if (q) {
+    q.addEventListener('input', function () {
+      var v = q.value.trim().toLowerCase();
+      links.forEach(function (a) {
+        a.parentNode.classList.toggle('hide', v !== '' && a.textContent.toLowerCase().indexOf(v) < 0);
+      });
+    });
+  }
+
+  var tops = [];
+  function measure() { tops = pairs.map(function (p) { return p.h.getBoundingClientRect().top + window.pageYOffset - 80; }); }
+  var navSide = document.querySelector('nav.side');
+  var cur = -1;
+  function setActive(idx) {
+    cur = idx;
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (idx < 0 || !navSide) return;
+    var a = pairs[idx].a;
+    a.classList.add('active');
+    // 只在侧栏自己的滚动条上挪动，绝不碰文档滚动条：
+    // 用 scrollIntoView 会让 Chrome 连带滚动 viewport（nav 是 sticky 的，
+    // 它的可视位置随文档滚动变化，于是形成"跳过去又被拽回目录"的反馈）。
+    var nr = navSide.getBoundingClientRect(), ar = a.getBoundingClientRect();
+    if (ar.top < nr.top + 4) { navSide.scrollTop -= (nr.top + 4 - ar.top); }
+    else if (ar.bottom > nr.bottom - 4) { navSide.scrollTop += (ar.bottom - nr.bottom + 4); }
+  }
+  var suppressUntil = 0;
+  function spy() {
+    if (!tops.length) return;
+    if (Date.now() < suppressUntil) return;
+    var y = window.pageYOffset, idx = -1;
+    for (var i = 0; i < tops.length; i++) { if (tops[i] <= y) { idx = i; } else { break; } }
+    if (idx === cur) return;
+    setActive(idx);
+  }
+  pairs.forEach(function (p) {
+    p.a.addEventListener('click', function () {
+      setActive(pairs.indexOf(p));
+      // html{scroll-behavior:smooth} 让锚点跳转变成一段动画，动画途中的 scroll
+      // 事件会把高亮改到中途经过的章节上，这里先按住 800ms 不跑 spy。
+      suppressUntil = Date.now() + 800;
+    });
+  });
+  var queued = false;
+  window.addEventListener('scroll', function () {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; spy(); });
+  }, { passive: true });
+  window.addEventListener('resize', function () { measure(); spy(); });
+  measure(); spy();
+  window.addEventListener('load', function () { measure(); spy(); });
+
+  var dl = document.getElementById('btn-download');
+  if (dl) {
+    dl.addEventListener('click', function () {
+      var blob = new Blob(['<!DOCTYPE html>\n' + document.documentElement.outerHTML], { type: 'text/html;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = PAGE_NAME;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+      toast('已下载 ' + PAGE_NAME);
+    });
+  }
+  var pr = document.getElementById('btn-print');
+  if (pr) pr.addEventListener('click', function () { window.print(); });
+  var ex = document.getElementById('btn-expand');
+  if (ex) {
+    ex.addEventListener('click', function () {
+      var on = document.body.classList.toggle('showallsrc');
+      ex.classList.toggle('on', on);
+      ex.textContent = on ? '收起全部源码' : '展开全部源码';
+      document.querySelectorAll('figure.mmd').forEach(function (f) { f.classList.toggle('showsrc', on); });
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>演讲评分系统 · 云服务器部署手册</title>
+<style>
+:root{
+  --lh:1.25;                 /* 全文 1.25 倍行距 */
+  --gap:1.5625em;            /* 段间距 = 1.25 倍行距 */
+  --font-head:"SimHei","Heiti SC","Microsoft YaHei","微软雅黑",sans-serif;
+  --font-body:"SimSun","Songti SC","宋体","Microsoft YaHei",serif;
+  --font-mono:"Consolas","JetBrains Mono","Courier New",monospace;
+  --accent:#0f766e; --accent-soft:#e8f4f2; --accent-line:#c3ded9;
+  --ink:#1f2933; --ink-soft:#5b6773; --line:#e2e8ee; --bg:#f7faf9; --panel:#fff;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);
+  font-size:12pt;line-height:var(--lh);-webkit-text-size-adjust:100%}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+header.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.95);
+  border-bottom:1px solid var(--line);backdrop-filter:blur(4px)}
+.topin{max-width:1360px;margin:0 auto;padding:9px 24px;display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+.topin .h{font-family:var(--font-head);font-weight:700;font-size:13pt;letter-spacing:.4px}
+.topin .sub{color:var(--ink-soft);font-size:10pt}
+.topin .tools{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-family:var(--font-body);font-size:10pt;line-height:1.5;padding:3px 9px;
+  border:1px solid var(--accent-line);background:#fff;color:var(--accent);border-radius:4px;cursor:pointer}
+.btn:hover{background:var(--accent-soft);text-decoration:none}
+.btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ghost{border-color:var(--line);color:var(--ink-soft)}
+
+.layout{max-width:1360px;margin:0 auto;padding:0 24px 60px;display:grid;
+  grid-template-columns:302px minmax(0,1fr);gap:30px;align-items:start}
+nav.side{position:sticky;top:50px;max-height:calc(100vh - 50px);overflow:auto;scroll-behavior:auto;padding:18px 6px 40px}
+nav.side .navtitle{font-family:var(--font-head);font-weight:700;font-size:11.5pt;margin:0 0 8px}
+nav.side .navswitch{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap}
+nav.side .search{margin:0 0 10px}
+nav.side input{width:100%;font-family:var(--font-body);font-size:10pt;padding:5px 8px;
+  border:1px solid var(--line);border-radius:4px;background:#fff}
+ul.toclist{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+ul.toclist li{margin:0}
+ul.toclist li a{display:block;padding:4px 8px;margin-left:-2px;border-left:2px solid transparent;
+  color:var(--ink-soft);font-size:10pt;line-height:1.3}
+ul.toclist li.l2>a{font-family:var(--font-head);font-size:10.5pt;color:var(--ink)}
+ul.toclist li.l3>a{padding-left:20px}
+ul.toclist li.l4>a{padding-left:36px;font-size:9.5pt}
+ul.toclist li a:hover{background:var(--accent-soft);color:var(--accent);text-decoration:none}
+ul.toclist li a.active{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent);font-weight:700}
+ul.toclist li.hide{display:none}
+
+main{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:30px 40px 54px}
+p.kicker{color:var(--ink-soft);font-size:9.5pt;margin:0 0 22px;text-indent:0;
+  padding-bottom:10px;border-bottom:1px dashed var(--line)}
+
+h1,h2,h3,h4,h5,h6{font-family:var(--font-head);font-weight:700;line-height:var(--lh);
+  margin:0 0 .55em;text-indent:0;padding:0;color:var(--ink);scroll-margin-top:64px;text-align:left}
+h1{font-size:26pt;margin-bottom:.4em;padding-bottom:.25em;border-bottom:3px solid var(--accent)}
+h2{font-size:18pt;margin-top:1.9em;padding-bottom:.15em;border-bottom:1px solid var(--accent-line)}
+h3{font-size:16pt;margin-top:1.5em}
+h4{font-size:15pt;margin-top:1.3em}
+h5{font-size:14pt;margin-top:1.2em}
+h6{font-size:12pt;margin-top:1.2em}
+
+article p{margin:0 0 var(--gap);text-indent:2em}
+article li p,article td p,article th p,article blockquote p,p.kicker{text-indent:0}
+article ul,article ol{margin:0 0 var(--gap);padding-left:2.4em}
+article li{margin:0 0 .28em}
+article blockquote{margin:0 0 var(--gap);padding:.7em 1em;background:var(--accent-soft);
+  border-left:4px solid var(--accent);border-radius:0 6px 6px 0}
+article hr{border:0;border-top:1px solid var(--line);margin:1.8em 0}
+article strong{font-family:var(--font-head)}
+del{color:#9aa5b1}
+code{font-family:var(--font-mono);font-size:.92em;background:#f1f4f5;border:1px solid #e3e9eb;
+  border-radius:3px;padding:.02em .28em;color:#0b5f57}
+table{border-collapse:collapse;width:100%;margin:0 0 var(--gap);font-size:10.5pt;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top;line-height:1.3}
+th{background:#f2f6f5;font-family:var(--font-head);white-space:nowrap}
+tbody tr:nth-child(even){background:#fbfdfd}
+
+.codeline,figure.mmd{margin:0 0 var(--gap);border:1px solid var(--line);border-radius:6px;background:#fff;overflow:hidden}
+.bar{display:flex;align-items:center;gap:8px;padding:4px 10px;background:#f4f7f7;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.chip{font-family:var(--font-mono);font-size:8.5pt;color:var(--ink-soft);letter-spacing:.6px;text-transform:uppercase}
+.state{font-size:9pt;color:var(--ink-soft)}
+.state[data-state="ok"]{color:#0f766e}
+.state[data-state="off"]{color:#9a5b00}
+.bar .btn{margin-left:0}
+.bar .cp-btn{margin-left:auto}
+.codeslot{overflow:hidden}
+.codehilite{background:#fcfdfd}
+.codehilite pre,.pending,.mmdsrc{margin:0;padding:12px 14px;font-family:var(--font-mono);
+  font-size:10pt;line-height:1.5;overflow-x:auto;white-space:pre;background:#fcfdfd}
+.pending{font-family:var(--font-mono);font-size:10pt;color:var(--ink-soft);text-align:left}
+figure.mmd .stage{padding:16px;overflow-x:auto;text-align:center;min-height:40px}
+figure.mmd .stage svg{max-width:100%;height:auto}
+figure.mmd .stage .pending{background:#fff}
+figure.mmd.off .stage{display:none}
+figure.mmd .mmdsrc{display:none;border-top:1px solid var(--line);background:#fbfcfc;text-align:left}
+figure.mmd.off .mmdsrc,figure.mmd.showsrc .mmdsrc{display:block}
+
+.pagefoot{max-width:1360px;margin:0 auto;padding:0 24px;color:var(--ink-soft);font-size:9.5pt}
+.toast{position:fixed;right:18px;bottom:18px;z-index:60;background:var(--ink);color:#fff;font-size:10pt;
+  padding:8px 14px;border-radius:6px;opacity:0;transition:opacity .18s;pointer-events:none}
+.toast.show{opacity:.94}
+
+@media (max-width:1080px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:0}
+  nav.side{position:static;max-height:none;padding-bottom:14px;border-bottom:1px solid var(--line)}
+  main{border-radius:0;border-left:0;border-right:0}
+  .topin .tools{margin-left:0;width:100%}
+}
+@media print{
+  header.top,nav.side,.pagefoot,.bar,.toast{display:none!important}
+  body{background:#fff;font-size:10.5pt}
+  .layout{display:block;max-width:none;padding:0}
+  main{border:0;padding:0;border-radius:0}
+  h2{break-after:avoid}
+  figure.mmd,.codeline,table{break-inside:avoid}
+}
+
+pre { line-height: 125%; }
+td.linenos .normal { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+.codehilite .hll { background-color: #ffffcc }
+.codehilite { background: #f8f8f8; }
+.codehilite .c { color: #3D7B7B; font-style: italic } /* Comment */
+.codehilite .err { border: 1px solid #FF0000 } /* Error */
+.codehilite .k { color: #008000; font-weight: bold } /* Keyword */
+.codehilite .o { color: #666666 } /* Operator */
+.codehilite .ch { color: #3D7B7B; font-style: italic } /* Comment.Hashbang */
+.codehilite .cm { color: #3D7B7B; font-style: italic } /* Comment.Multiline */
+.codehilite .cp { color: #9C6500 } /* Comment.Preproc */
+.codehilite .cpf { color: #3D7B7B; font-style: italic } /* Comment.PreprocFile */
+.codehilite .c1 { color: #3D7B7B; font-style: italic } /* Comment.Single */
+.codehilite .cs { color: #3D7B7B; font-style: italic } /* Comment.Special */
+.codehilite .gd { color: #A00000 } /* Generic.Deleted */
+.codehilite .ge { font-style: italic } /* Generic.Emph */
+.codehilite .gr { color: #E40000 } /* Generic.Error */
+.codehilite .gh { color: #000080; font-weight: bold } /* Generic.Heading */
+.codehilite .gi { color: #008400 } /* Generic.Inserted */
+.codehilite .go { color: #717171 } /* Generic.Output */
+.codehilite .gp { color: #000080; font-weight: bold } /* Generic.Prompt */
+.codehilite .gs { font-weight: bold } /* Generic.Strong */
+.codehilite .gu { color: #800080; font-weight: bold } /* Generic.Subheading */
+.codehilite .gt { color: #0044DD } /* Generic.Traceback */
+.codehilite .kc { color: #008000; font-weight: bold } /* Keyword.Constant */
+.codehilite .kd { color: #008000; font-weight: bold } /* Keyword.Declaration */
+.codehilite .kn { color: #008000; font-weight: bold } /* Keyword.Namespace */
+.codehilite .kp { color: #008000 } /* Keyword.Pseudo */
+.codehilite .kr { color: #008000; font-weight: bold } /* Keyword.Reserved */
+.codehilite .kt { color: #B00040 } /* Keyword.Type */
+.codehilite .m { color: #666666 } /* Literal.Number */
+.codehilite .s { color: #BA2121 } /* Literal.String */
+.codehilite .na { color: #687822 } /* Name.Attribute */
+.codehilite .nb { color: #008000 } /* Name.Builtin */
+.codehilite .nc { color: #0000FF; font-weight: bold } /* Name.Class */
+.codehilite .no { color: #880000 } /* Name.Constant */
+.codehilite .nd { color: #AA22FF } /* Name.Decorator */
+.codehilite .ni { color: #717171; font-weight: bold } /* Name.Entity */
+.codehilite .ne { color: #CB3F38; font-weight: bold } /* Name.Exception */
+.codehilite .nf { color: #0000FF } /* Name.Function */
+.codehilite .nl { color: #767600 } /* Name.Label */
+.codehilite .nn { color: #0000FF; font-weight: bold } /* Name.Namespace */
+.codehilite .nt { color: #008000; font-weight: bold } /* Name.Tag */
+.codehilite .nv { color: #19177C } /* Name.Variable */
+.codehilite .ow { color: #AA22FF; font-weight: bold } /* Operator.Word */
+.codehilite .w { color: #bbbbbb } /* Text.Whitespace */
+.codehilite .mb { color: #666666 } /* Literal.Number.Bin */
+.codehilite .mf { color: #666666 } /* Literal.Number.Float */
+.codehilite .mh { color: #666666 } /* Literal.Number.Hex */
+.codehilite .mi { color: #666666 } /* Literal.Number.Integer */
+.codehilite .mo { color: #666666 } /* Literal.Number.Oct */
+.codehilite .sa { color: #BA2121 } /* Literal.String.Affix */
+.codehilite .sb { color: #BA2121 } /* Literal.String.Backtick */
+.codehilite .sc { color: #BA2121 } /* Literal.String.Char */
+.codehilite .dl { color: #BA2121 } /* Literal.String.Delimiter */
+.codehilite .sd { color: #BA2121; font-style: italic } /* Literal.String.Doc */
+.codehilite .s2 { color: #BA2121 } /* Literal.String.Double */
+.codehilite .se { color: #AA5D1F; font-weight: bold } /* Literal.String.Escape */
+.codehilite .sh { color: #BA2121 } /* Literal.String.Heredoc */
+.codehilite .si { color: #A45A77; font-weight: bold } /* Literal.String.Interpol */
+.codehilite .sx { color: #008000 } /* Literal.String.Other */
+.codehilite .sr { color: #A45A77 } /* Literal.String.Regex */
+.codehilite .s1 { color: #BA2121 } /* Literal.String.Single */
+.codehilite .ss { color: #19177C } /* Literal.String.Symbol */
+.codehilite .bp { color: #008000 } /* Name.Builtin.Pseudo */
+.codehilite .fm { color: #0000FF } /* Name.Function.Magic */
+.codehilite .vc { color: #19177C } /* Name.Variable.Class */
+.codehilite .vg { color: #19177C } /* Name.Variable.Global */
+.codehilite .vi { color: #19177C } /* Name.Variable.Instance */
+.codehilite .vm { color: #19177C } /* Name.Variable.Magic */
+.codehilite .il { color: #666666 } /* Literal.Number.Integer.Long */
+body.showallsrc figure.mmd .mmdsrc{display:block}
+</style>
+</head>
+<body>
+<header class="top"><div class="topin">
+  <span class="h">演讲评分系统 · 云服务器部署手册</span><span class="sub">阿里云 ECS 2 vCPU / 2 GiB 单机上线与运维</span>
+  <span class="tools">
+    <button type="button" class="btn" id="btn-download">下载本页 HTML</button>
+    <button type="button" class="btn ghost" id="btn-expand">展开全部源码</button>
+    <a class="btn ghost" href="演讲评分系统-文档包-20260928.zip" download="演讲评分系统-文档包-20260928.zip">打包下载（5 份 HTML）</a>
+    <button type="button" class="btn ghost" id="btn-print">打印 / 存 PDF</button>
+  </span>
+</div></header>
+
+<div class="layout">
+  <nav class="side" aria-label="目录">
+    <div class="navswitch"><a class="btn ghost" href="项目建议书与方案报告.html">项目建议书</a> <a class="btn ghost" href="设计报告.html">设计报告</a> <a class="btn on" href="部署手册.html">部署手册</a> <a class="btn ghost" href="方案-版本指纹与压缩闸门.html">方案·版本与闸门</a> <a class="btn ghost" href="方案-文字稿纠错与朗读合成.html">方案·改稿与朗读</a></div>
+    <p class="navtitle">目录</p>
+    <div class="search"><input id="q" type="search" placeholder="筛选目录…" aria-label="筛选目录"></div>
+    <div id="tocnav"><ul class="toclist">
+<li class="l2"><a href="#0-先看这一段：整体形态与为什么这样部署" title="0. 先看这一段：整体形态与为什么这样部署">0. 先看这一段：整体形态与为什么这样部署</a></li>
+<li class="l2"><a href="#1-服务器准备（阿里云控制台，5-分钟）" title="1. 服务器准备（阿里云控制台，5 分钟）">1. 服务器准备（阿里云控制台，5 分钟）</a></li>
+<li class="l3"><a href="#11-装系统" title="1.1 装系统">1.1 装系统</a></li>
+<li class="l3"><a href="#12-安全组（最容易漏的一步）" title="1.2 安全组（最容易漏的一步）">1.2 安全组（最容易漏的一步）</a></li>
+<li class="l3"><a href="#13-登录并确认机器规格" title="1.3 登录并确认机器规格">1.3 登录并确认机器规格</a></li>
+<li class="l2"><a href="#2-在本地-windows-上打发布包" title="2. 在本地 Windows 上打发布包">2. 在本地 Windows 上打发布包</a></li>
+<li class="l2"><a href="#3-上传、安装、填密钥（服务器上，约-10-分钟）" title="3. 上传、安装、填密钥（服务器上，约 10 分钟）">3. 上传、安装、填密钥（服务器上，约 10 分钟）</a></li>
+<li class="l3"><a href="#31-上传发布包和密钥" title="3.1 上传发布包和密钥">3.1 上传发布包和密钥</a></li>
+<li class="l3"><a href="#32-解压并安装" title="3.2 解压并安装">3.2 解压并安装</a></li>
+<li class="l3"><a href="#33-常用变体" title="3.3 常用变体">3.3 常用变体</a></li>
+<li class="l2"><a href="#4-验收清单（照着勾，全部通过再交付）" title="4. 验收清单（照着勾，全部通过再交付）">4. 验收清单（照着勾，全部通过再交付）</a></li>
+<li class="l3"><a href="#41-机器验收（30-秒）" title="4.1 机器验收（30 秒）">4.1 机器验收（30 秒）</a></li>
+<li class="l3"><a href="#42-服务与端口" title="4.2 服务与端口">4.2 服务与端口</a></li>
+<li class="l3"><a href="#43-人验收（用浏览器）" title="4.3 人验收（用浏览器）">4.3 人验收（用浏览器）</a></li>
+<li class="l3"><a href="#44-上线后必做" title="4.4 上线后必做">4.4 上线后必做</a></li>
+<li class="l2"><a href="#5-日常运维命令" title="5. 日常运维命令">5. 日常运维命令</a></li>
+<li class="l2"><a href="#6-开机自启、宕机自愈、任务恢复" title="6. 开机自启、宕机自愈、任务恢复">6. 开机自启、宕机自愈、任务恢复</a></li>
+<li class="l2"><a href="#7-磁盘与数据（这台机器最需要盯的东西）" title="7. 磁盘与数据（这台机器最需要盯的东西）">7. 磁盘与数据（这台机器最需要盯的东西）</a></li>
+<li class="l3"><a href="#71-什么在吃磁盘" title="7.1 什么在吃磁盘">7.1 什么在吃磁盘</a></li>
+<li class="l3"><a href="#72-关键事实：系统没有任何自动清理" title="7.2 关键事实：系统没有任何自动清理">7.2 关键事实：系统没有任何自动清理</a></li>
+<li class="l3"><a href="#73-三种扩容方案" title="7.3 三种扩容方案">7.3 三种扩容方案</a></li>
+<li class="l3"><a href="#74-清理谁的数据" title="7.4 清理谁的数据">7.4 清理谁的数据</a></li>
+<li class="l2"><a href="#8-升级与回滚" title="8. 升级与回滚">8. 升级与回滚</a></li>
+<li class="l2"><a href="#9-备份" title="9. 备份">9. 备份</a></li>
+<li class="l2"><a href="#10-已知限制（提前告诉用户，比事后解释强）" title="10. 已知限制（提前告诉用户，比事后解释强）">10. 已知限制（提前告诉用户，比事后解释强）</a></li>
+<li class="l2"><a href="#11-故障排查表" title="11. 故障排查表">11. 故障排查表</a></li>
+<li class="l3"><a href="#111-忘了管理员口令（不影响普通用户）" title="11.1 忘了管理员口令（不影响普通用户）">11.1 忘了管理员口令（不影响普通用户）</a></li>
+<li class="l2"><a href="#12-常见变更怎么做" title="12. 常见变更怎么做">12. 常见变更怎么做</a></li>
+<li class="l3"><a href="#121-换端口" title="12.1 换端口">12.1 换端口</a></li>
+<li class="l3"><a href="#122-不要-nginx" title="12.2 不要 nginx">12.2 不要 nginx</a></li>
+<li class="l3"><a href="#123-把本地已有的数据搬上服务器" title="12.3 把本地已有的数据搬上服务器">12.3 把本地已有的数据搬上服务器</a></li>
+<li class="l3"><a href="#124-将来要-https（本次不做，留个路径）" title="12.4 将来要 HTTPS（本次不做，留个路径）">12.4 将来要 HTTPS（本次不做，留个路径）</a></li>
+<li class="l3"><a href="#125-换更大的机器" title="12.5 换更大的机器">12.5 换更大的机器</a></li>
+<li class="l2"><a href="#13-部署产物清单（仓库里新增的-8-个文件）" title="13. 部署产物清单（仓库里新增的 8 个文件）">13. 部署产物清单（仓库里新增的 8 个文件）</a></li>
+</ul></div>
+  </nav>
+  <main><article>
+    <p class="kicker">源文件 <code>deploy/部署手册.md</code> · 生成于 2026-09-29 14:49</p>
+<h1 id="演讲评分系统-·-云服务器部署手册">演讲评分系统 · 云服务器部署手册</h1>
+<p>目标机器：<strong>阿里云 ECS 2 vCPU / 2 GiB / 40 GiB ESSD / 固定带宽 3 Mbps</strong>
+部署形态：<strong>systemd 跑 uvicorn 单进程 + nginx 反向代理</strong>，用 <strong>公网 IP + HTTP</strong> 访问，不要域名和证书。</p>
+<blockquote>
+<p>本手册里的命令都可以直接照抄——这份 HTML 生成时已填入公网 IP <code>&lt;公网IP&gt;</code> 与发布包日期 <code>20260928</code>。Markdown 源（<code>deploy/部署手册.md</code>）里仍写作占位符；换服务器时用 <code>python tools/build_html.py --ip 新地址 --date 新日期</code> 重新生成本页即可。</p>
+</blockquote>
+<hr />
+<h2 id="0-先看这一段：整体形态与为什么这样部署">0. 先看这一段：整体形态与为什么这样部署</h2>
+<figure class="mmd"><div class="bar"><span class="chip">mermaid 流程图</span><span class="state" data-state="wait">等待渲染…</span><button type="button" class="btn mmd-btn" data-target="mmd-1">取 mermaid 源码</button><button type="button" class="btn cp-btn" data-target="mmd-1">复制源码</button><button type="button" class="btn z-btn" data-act="out" title="缩小流程图">−</button><button type="button" class="btn z-btn" data-act="in" title="放大流程图">＋</button><button type="button" class="btn z-btn" data-act="reset" title="恢复原始大小">还原</button></div><div class="stage" id="stage-1"><pre class="pending">flowchart TB
+  U[&quot;手机 / 电脑浏览器&quot;]
+  N[&quot;nginx&lt;br/&gt;/etc/nginx/conf.d/speech-assist.conf&lt;br/&gt;client_max_body_size = MAX_VIDEO_MB + 20&lt;br/&gt;/static/ 直接读盘，其余全部反代&lt;br/&gt;/health 只允许 127.0.0.1&lt;br/&gt;proxy_buffering off · 视频流不落盘不缓冲&quot;]
+  S[&quot;systemd: speech-assist.service&lt;br/&gt;uvicorn app.main:app · 单进程 · 无 --workers&lt;br/&gt;用户 speech · WorkingDirectory=/opt/speech-assist&quot;]
+  D[&quot;SQLite&lt;br/&gt;/opt/speech-assist/data/speech.db&quot;]
+  V[&quot;视频 / 关键帧&lt;br/&gt;/opt/speech-assist/data 下的 videos 与 artifacts&quot;]
+  Q[&quot;千问 API&lt;br/&gt;https://dashscope.aliyuncs.com&quot;]
+  U --&gt;|80 端口 · 对外只开这一个| N
+  N --&gt;|127.0.0.1:8000 · 不对公网开放| S
+  S --&gt; D
+  S --&gt; V
+  S --&gt;|出网| Q</pre></div><pre class="mmdsrc" id="mmd-1" hidden>flowchart TB
+  U[&quot;手机 / 电脑浏览器&quot;]
+  N[&quot;nginx&lt;br/&gt;/etc/nginx/conf.d/speech-assist.conf&lt;br/&gt;client_max_body_size = MAX_VIDEO_MB + 20&lt;br/&gt;/static/ 直接读盘，其余全部反代&lt;br/&gt;/health 只允许 127.0.0.1&lt;br/&gt;proxy_buffering off · 视频流不落盘不缓冲&quot;]
+  S[&quot;systemd: speech-assist.service&lt;br/&gt;uvicorn app.main:app · 单进程 · 无 --workers&lt;br/&gt;用户 speech · WorkingDirectory=/opt/speech-assist&quot;]
+  D[&quot;SQLite&lt;br/&gt;/opt/speech-assist/data/speech.db&quot;]
+  V[&quot;视频 / 关键帧&lt;br/&gt;/opt/speech-assist/data 下的 videos 与 artifacts&quot;]
+  Q[&quot;千问 API&lt;br/&gt;https://dashscope.aliyuncs.com&quot;]
+  U --&gt;|80 端口 · 对外只开这一个| N
+  N --&gt;|127.0.0.1:8000 · 不对公网开放| S
+  S --&gt; D
+  S --&gt; V
+  S --&gt;|出网| Q</pre></figure>
+<p>四条不能改的硬约束（改了就坏）：</p>
+<table>
+<thead>
+<tr>
+<th>约束</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>uvicorn 只能单进程</strong></td>
+<td>分析任务状态、并发信号量、SQLite 连接都在进程内。多 worker 会出现"进度页查不到任务"、并发限制失效、SQLite 写冲突。<code>install.sh</code> 会检查 unit 里出现 <code>--workers</code> 就中止。</td>
+</tr>
+<tr>
+<td><strong>不能用 <code>ProtectHome=true</code> / <code>ProtectSystem=strict</code></strong></td>
+<td>应用会把配置写回代码目录（<code>.env</code>、<code>提示词.json</code>）。strict 沙箱下网页里改设置会保存失败。</td>
+</tr>
+<tr>
+<td><strong><code>ASR_ENGINE</code> 必须保持 <code>qwen</code></strong></td>
+<td>换成本地 whisper（small 约 +2GB）会立刻打爆 2 GiB 内存。</td>
+</tr>
+<tr>
+<td><strong><code>client_max_body_size</code> 必须 ≥ <code>MAX_VIDEO_MB</code></strong></td>
+<td>nginx 默认 1 MB，会在应用之前返回 413，症状是"上传大视频直接失败，日志里没有任何应用记录"。<code>install.sh</code> 会自动对齐。</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这台机器的真实上限</strong>：内存不是瓶颈（实测应用 2 并发峰值约 500–600 MB），<strong>3 Mbps 出网（约 375 KB/s）才是</strong>。两个人同时在线回看视频会明显卡顿，这是带宽决定的，不是配置能优化的。详见第 10 节。</p>
+<hr />
+<h2 id="1-服务器准备（阿里云控制台，5-分钟）">1. 服务器准备（阿里云控制台，5 分钟）</h2>
+<h3 id="11-装系统">1.1 装系统</h3>
+<p>必须是 <strong>Ubuntu 22.04 64位</strong>。</p>
+<ul>
+<li>❌ 不要用 Ubuntu 20.04（自带 Python 3.8，本项目要求 ≥ 3.10，<code>install.sh</code> 会直接报错退出）</li>
+<li>❌ 不要用 Alibaba Cloud Linux / CentOS（脚本里的包名、路径按 Debian 系写的）</li>
+<li>重装系统入口：控制台 → 实例 → 更多 → 云盘和镜像 → <strong>更换操作系统</strong>（会清空系统盘，<strong>做之前先备份 <code>data/</code></strong>，见第 9 节）</li>
+</ul>
+<p>登录方式选"密钥"或"密码"都行，下面命令按 <code>root</code> 用户写。</p>
+<h3 id="12-安全组（最容易漏的一步）">1.2 安全组（最容易漏的一步）</h3>
+<p>控制台 → 实例 → 安全组 → <strong>管理规则 → 入方向 → 手动添加</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>端口</th>
+<th>授权对象</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>22/22</code></td>
+<td>建议改成你自己办公网络的固定 IP 段</td>
+<td>SSH。放 <code>0.0.0.0/0</code> 会被全网爆破，能收紧就收紧</td>
+</tr>
+<tr>
+<td><code>80/80</code></td>
+<td><code>0.0.0.0/0</code></td>
+<td>用户访问端口</td>
+</tr>
+<tr>
+<td><del><code>8000/8000</code></del></td>
+<td><strong>不要加</strong></td>
+<td>uvicorn 只监听 <code>127.0.0.1</code>，它不该对公网开放；开等于绕过 nginx 的体积限制和安全响应头</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>只有当你用 <code>--no-nginx</code> 部署时，才需要放行 <code>--app-port</code> 指定的那个端口。</p>
+</blockquote>
+<h3 id="13-登录并确认机器规格">1.3 登录并确认机器规格</h3>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-1">复制代码</button></div><div class="codeslot" id="code-1"><div class="codehilite"><pre><span></span>ssh<span class="w"> </span>root@&lt;公网IP&gt;
+
+<span class="c1"># 三条确认命令，输出应当分别是 2、约 2Gi、约 40G</span>
+nproc
+free<span class="w"> </span>-h<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-2
+df<span class="w"> </span>-h<span class="w"> </span>/<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1
+</pre></div></div></div>
+<hr />
+<h2 id="2-在本地-windows-上打发布包">2. 在本地 Windows 上打发布包</h2>
+<p>git 远端只用于<strong>代码备份与异地容灾</strong>：服务器上没有仓库凭据，<code>/opt/speech-assist</code> 也不是 git 工作树（它由 rsync 出来，且 <code>.env</code> / <code>api_key.txt</code> / <code>data/</code> 本来就在 git 之外），所以服务器上没法靠 <code>git clone</code> / <code>git pull</code> 完成部署。发布链路是「本地打包 → scp 上传 → 解压 → 安装脚本」，日常升级走第 8 节。</p>
+<p>在你自己的 <code>speech_assist</code> 目录里，用 <strong>PowerShell</strong>：</p>
+<div class="codeline"><div class="bar"><span class="chip">powershell</span><button type="button" class="btn cp-btn" data-target="code-2">复制代码</button></div><div class="codeslot" id="code-2"><div class="codehilite"><pre><span></span><span class="nb">cd </span><span class="n">d</span><span class="p">:\</span><span class="n">heyun</span><span class="p">\</span><span class="n">speech_assist</span>
+<span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="o">-File</span> <span class="n">deploy</span><span class="p">\</span><span class="n">package</span><span class="p">.</span><span class="n">ps1</span>
+</pre></div></div></div>
+<p>产出：<code>dist\speech-assist-20260928.tar.gz</code>，实测 <strong>3.37 MB / 52 个文件</strong>（体积几乎全来自 <code>tests/sample_speech.mp4</code>，带上它是为了装完能在服务器上直接跑自检；包根另有 <code>BUILD_INFO.json</code> 版本指纹，见 §8 与 §11）；<code>-SkipTests</code> 时约 0.2 MB 以内。</p>
+<p>脚本做四件事，都是为了避开已知坑：</p>
+<ol>
+<li><strong>白名单打包</strong>：只带 <code>app/ deploy/ docs/ tests/ requirements.txt 评价标准.txt .env.example</code>。
+   <code>api_key.txt</code>、<code>.env</code>、<code>data/</code> <strong>一定不进包</strong> —— 否则要么把千问密钥传到公网机器上，要么把本地开发用的 <code>SECRET_KEY</code> / <code>admin123</code> 盖到服务器上，要么覆盖真实用户数据。</li>
+<li><strong>换行符归一为 LF</strong>：<code>deploy/*.sh</code>、<code>speech-assist.service</code>、<code>nginx-speech-assist.conf</code>、<code>env.production</code>。Windows 上写的 bash 脚本带 CRLF，在 Linux 上会报 <code>/usr/bin/env: bash\r: No such file or directory</code>，这是最常见的"脚本第一步就跑不起来"。</li>
+<li><strong>回环校验</strong>：打完立刻解压一次，确认中文文件名 <code>评价标准.txt</code> 没被编码破坏（它被应用硬编码引用，缺了就直接起不来），并确认脚本里没有残留 CR。
+   实测确认包名以 UTF-8 存储（包内找不到 GBK 编码的文件名字节），所以 Linux 上 <code>tar xzf</code> 解出来是正常中文名；<code>tar -tzf</code> 在 PowerShell 里显示成乱码只是控制台代码页问题，不是包的问题。</li>
+<li><strong>版本指纹</strong>：打包前从 git 取短 sha、分支与脏标记，写成包根的 <code>BUILD_INFO.json</code>，并在末尾打印。升级后 <code>/health</code> 的 <code>version</code> 应等于它（第 8 节的 <code>update.sh</code> 会自动对账）。取不到 git（比如手工拷出去的目录）会记 <code>unknown</code> 并照常打包——指纹是诊断信息，不拦发布。</li>
+</ol>
+<p>可选参数：</p>
+<div class="codeline"><div class="bar"><span class="chip">powershell</span><button type="button" class="btn cp-btn" data-target="code-3">复制代码</button></div><div class="codeslot" id="code-3"><div class="codehilite"><pre><span></span><span class="c"># 换输出目录</span>
+<span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="o">-File</span> <span class="n">deploy</span><span class="p">\</span><span class="n">package</span><span class="p">.</span><span class="n">ps1</span> <span class="n">-OutDir</span> <span class="n">D</span><span class="p">:\</span><span class="n">release</span>
+<span class="c"># 不带 tests/（服务器上不打算跑自检时用）</span>
+<span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="o">-File</span> <span class="n">deploy</span><span class="p">\</span><span class="n">package</span><span class="p">.</span><span class="n">ps1</span> <span class="n">-SkipTests</span>
+</pre></div></div></div>
+<hr />
+<h2 id="3-上传、安装、填密钥（服务器上，约-10-分钟）">3. 上传、安装、填密钥（服务器上，约 10 分钟）</h2>
+<h3 id="31-上传发布包和密钥">3.1 上传发布包和密钥</h3>
+<p>在本地 PowerShell 里（<code>api_key.txt</code> 单独传，因为它不在发布包里）：</p>
+<div class="codeline"><div class="bar"><span class="chip">powershell</span><button type="button" class="btn cp-btn" data-target="code-4">复制代码</button></div><div class="codeslot" id="code-4"><div class="codehilite"><pre><span></span><span class="nb">cd </span><span class="n">d</span><span class="p">:\</span><span class="n">heyun</span><span class="p">\</span><span class="n">speech_assist</span>
+<span class="n">scp</span> <span class="n">dist</span><span class="p">\</span><span class="n">speech-assist</span><span class="p">-</span><span class="n">20260928</span><span class="p">.</span><span class="n">tar</span><span class="p">.</span><span class="n">gz</span> <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">root</span><span class="p">/</span>
+<span class="n">scp</span> <span class="n">api_key</span><span class="p">.</span><span class="n">txt</span> <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">root</span><span class="p">/</span>
+</pre></div></div></div>
+<p><code>api_key.txt</code> 里就是你的阿里云百炼（DashScope）API Key，一行即可。</p>
+<h3 id="32-解压并安装">3.2 解压并安装</h3>
+<p>在服务器（SSH 会话）里：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-5">复制代码</button></div><div class="codeslot" id="code-5"><div class="codehilite"><pre><span></span><span class="nb">cd</span><span class="w"> </span>/root
+tar<span class="w"> </span>xzf<span class="w"> </span>speech-assist-20260928.tar.gz
+cp<span class="w"> </span>/root/api_key.txt<span class="w"> </span>speech-assist-20260928/<span class="w">       </span><span class="c1"># install.sh 会自动放进 /opt 并 chmod 600</span>
+<span class="nb">cd</span><span class="w"> </span>speech-assist-20260928
+
+sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh
+</pre></div></div></div>
+<p>想自己定管理员口令（不指定则随机生成并<strong>只打印一次</strong>）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-6">复制代码</button></div><div class="codeslot" id="code-6"><div class="codehilite"><pre><span></span>sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--admin-password<span class="w"> </span><span class="s1">&#39;你的管理员口令&#39;</span>
+</pre></div></div></div>
+<p>口令里有 <code>#</code> 时值得知道（都是实测）：<code>#</code> 紧跟字符（<code>My-Pw#2026</code>）能原样读回，<code>#</code> <strong>前面有空格或制表符</strong>（<code>a #b</code>）会被 dotenv 当成行内注释、口令静默变成 <code>a</code>；值里带引号且不成对（<code>"ab</code>）会让整行解析失败、键直接消失。<code>install.sh</code> 遇到第一种情况会自动加引号写回（引号被剥掉、口令原样生效），遇到无法安全表达的情况会打印 <code>[注意]</code> 让你换口令。</p>
+<p><code>--admin-password</code> / <code>--admin-user</code> <strong>只在 <code>.env</code> 里那两项还是占位符或默认值时生效</strong>。装完再跑一次并带上它们不会改口令也不会改名（会明确打印「未生效」）——改口令的唯一入口是登录后的 <code>/settings</code>（保存时回写数据库哈希），忘了口令的救法见 §11.1。</p>
+<p><code>install.sh</code> 依次做的事：</p>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>同步代码</td>
+<td><code>rsync -a --delete</code> 到 <code>/opt/speech-assist</code>，<code>--delete</code> 保证删掉的文件真被删；<code>.env</code> / <code>api_key.txt</code> / <code>data/</code> / <code>.venv</code> / <code>提示词.json</code> 在 exclude 列表里，<strong>既不被覆盖也不被误删</strong></td>
+</tr>
+<tr>
+<td>断言</td>
+<td><code>app/</code> 与 <code>评价标准.txt</code> 必须存在，否则中止</td>
+</tr>
+<tr>
+<td>系统依赖</td>
+<td><code>apt-get install</code> python3-venv、ffmpeg、nginx、rsync、curl、openssl 等</td>
+</tr>
+<tr>
+<td>pip 源</td>
+<td>能解析到 <code>mirrors.cloud.aliyuncs.com</code> 就走<strong>阿里云内网源</strong>（不占那 3 Mbps 公网出口）</td>
+</tr>
+<tr>
+<td>swap</td>
+<td>内存 &lt; 4 GiB 且无 swap 时建 2 G <code>/swapfile</code>，写 <code>/etc/fstab</code>，<code>vm.swappiness=10</code>。这是 OOM 保险，不是性能手段</td>
+</tr>
+<tr>
+<td>运行账号</td>
+<td>建 <code>speech</code> 系统用户（<code>nologin</code>）</td>
+</tr>
+<tr>
+<td>venv</td>
+<td><code>/opt/speech-assist/.venv</code> + <code>pip install -r requirements.txt</code>，并断言 Python ≥ 3.10</td>
+</tr>
+<tr>
+<td><code>.env</code></td>
+<td>用 <code>deploy/env.production</code> 生成，随机 <code>SECRET_KEY</code>（64 位十六进制）、填管理员口令；<strong>已存在则只补占位符，不覆盖你改过的值</strong></td>
+</tr>
+<tr>
+<td>权限</td>
+<td>目录 755 / 文件 644 / <code>.env</code> 与 <code>api_key.txt</code> 600，属主 <code>speech</code>；<code>.venv</code> 被 prune 掉以免打回可执行位</td>
+</tr>
+<tr>
+<td>systemd</td>
+<td>渲染 <code>speech-assist.service</code> 到 <code>/etc/systemd/system/</code>，<code>daemon-reload</code> + <code>enable</code></td>
+</tr>
+<tr>
+<td>nginx</td>
+<td>渲染到 <code>/etc/nginx/conf.d/speech-assist.conf</code>，<strong>移除 Ubuntu 自带的 default 站点</strong>（它会抢 80 端口的默认服务器），<code>nginx -t</code> 通过后 restart</td>
+</tr>
+<tr>
+<td>ufw</td>
+<td>如果启用了本机防火墙，放行对外端口</td>
+</tr>
+<tr>
+<td>验收</td>
+<td>最多等 30 秒轮询 <code>http://127.0.0.1/health</code>，通过则打印模式/ffmpeg/自动压缩目标/并发等实况</td>
+</tr>
+</tbody>
+</table>
+<p>脚本是<strong>幂等</strong>的：跑第二遍不会动你的 <code>.env</code>、<code>api_key.txt</code>、<code>data/</code>，venv 只补装差异依赖。</p>
+<h3 id="33-常用变体">3.3 常用变体</h3>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-7">复制代码</button></div><div class="codeslot" id="code-7"><div class="codehilite"><pre><span></span><span class="c1"># 80 被占用 / 不想用 80</span>
+sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--listen-port<span class="w"> </span><span class="m">8080</span>
+
+<span class="c1"># 不要 nginx，让 uvicorn 直接监听 0.0.0.0:8080（此时安全组要放行 8080）</span>
+sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--no-nginx<span class="w"> </span>--listen-port<span class="w"> </span><span class="m">8080</span>
+
+<span class="c1"># 装到别的目录 / 换应用内部端口</span>
+sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--app-dir<span class="w"> </span>/data/speech-assist<span class="w"> </span>--app-port<span class="w"> </span><span class="m">8123</span>
+
+<span class="c1"># 已看过帮助</span>
+sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--help
+</pre></div></div></div>
+<hr />
+<h2 id="4-验收清单（照着勾，全部通过再交付）">4. 验收清单（照着勾，全部通过再交付）</h2>
+<h3 id="41-机器验收（30-秒）">4.1 机器验收（30 秒）</h3>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-8">复制代码</button></div><div class="codeslot" id="code-8"><div class="codehilite"><pre><span></span>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1/health<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+</pre></div></div></div>
+<p>逐项对照：</p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>期望值</th>
+<th>不对时</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td><code>real</code></td>
+<td>是 <code>mock</code> → 报告是演示数据。检查 <code>api_key.txt</code> 是否存在且 <code>chmod 600</code> 可读，然后 <code>systemctl restart speech-assist</code></td>
+</tr>
+<tr>
+<td><code>key_source</code></td>
+<td><code>api_key.txt</code>（或 <code>DASHSCOPE_API_KEY</code>）</td>
+<td><code>none</code> → 密钥没到位</td>
+</tr>
+<tr>
+<td><code>ffmpeg</code></td>
+<td><code>true</code></td>
+<td><code>false</code> → <code>apt-get install -y ffmpeg</code> 后重启服务。<strong>它同时是抽帧与自动压缩的硬依赖</strong>：<code>compress_target_mb</code> 不为 0 而 ffmpeg 缺失时，超过目标的视频会在压缩这一步直接报错（不会静默按原体积分析）</td>
+</tr>
+<tr>
+<td><code>compress_target_mb</code></td>
+<td><code>50</code></td>
+<td><code>0</code> → 自动压缩已关闭，超过 <code>MAX_VIDEO_MB</code> 的照样拒收、没超过的原样入库。想改就在 <code>/settings</code> 的「站点」区改「自动压缩目标」，保存即生效</td>
+</tr>
+<tr>
+<td><code>face_metrics</code></td>
+<td><code>true</code></td>
+<td><code>false</code> → 人脸层降级，分数仍出，只是少了表情/朝向这类交叉核对指标。旁边会带一句 <code>face_metrics_note</code> 说明原因（装到 <code>opencv-python-headless</code> 5.x 是最常见的一种，<code>pip install 'opencv-python-headless&gt;=4.10,&lt;5'</code> 后重启即可）</td>
+</tr>
+<tr>
+<td><code>rubric</code></td>
+<td>你的评分标准摘要</td>
+<td>报"缺失" → <code>评价标准.txt</code> 没进包</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>本次打包时 <code>package.ps1</code> 末尾打印的短 sha（形如 <code>26b04cb1f·main</code>，脏工作区会挂 <code>+dirty</code>）</td>
+<td>与本次包不符 → 传错包或 rsync 没生效（第 8 节的 <code>update.sh</code> 会自动做这道对账）；<code>unknown</code> → 包里没有 <code>BUILD_INFO.json</code>（旧包），升级一次即可补上</td>
+</tr>
+<tr>
+<td><code>asr_engine_label</code></td>
+<td>千问转录</td>
+<td>显示 whisper → 这台机器上必须改回 <code>qwen</code></td>
+</tr>
+<tr>
+<td><code>concurrency.analyzers</code></td>
+<td><code>2</code></td>
+<td>与 <code>.env</code> 的 <code>MAX_ANALYZERS</code> 不一致说明改完没重启</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>/health</code> 里含模型名与 token 用量，nginx 已把它限成 <strong>只有 127.0.0.1 能访问</strong>。从公网 <code>http://&lt;公网IP&gt;/health</code> 应当拿到 <strong>403</strong>，这是对的。</p>
+</blockquote>
+<h3 id="42-服务与端口">4.2 服务与端口</h3>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-9">复制代码</button></div><div class="codeslot" id="code-9"><div class="codehilite"><pre><span></span>systemctl<span class="w"> </span>status<span class="w"> </span>speech-assist<span class="w"> </span>--no-pager<span class="w">          </span><span class="c1"># Active: active (running)，enabled</span>
+ss<span class="w"> </span>-ltnp<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;:(80|8000)\b&#39;</span>
+<span class="c1"># 期望：0.0.0.0:80 由 nginx 持有；127.0.0.1:8000 由 uvicorn 持有，**不是 0.0.0.0:8000**</span>
+journalctl<span class="w"> </span>-u<span class="w"> </span>speech-assist<span class="w"> </span>-n<span class="w"> </span><span class="m">60</span><span class="w"> </span>--no-pager<span class="w">       </span><span class="c1"># 无 Traceback</span>
+</pre></div></div></div>
+<h3 id="43-人验收（用浏览器）">4.3 人验收（用浏览器）</h3>
+<ol>
+<li>电脑 Chrome 打开 <code>http://&lt;公网IP&gt;/</code> → 应重定向到登录页（<strong>打不开 = 安全组没放行 80</strong>）</li>
+<li>用管理员账号（默认用户名 <code>admin</code>，口令见安装输出或 <code>/opt/speech-assist/.env</code> 的 <code>ADMIN_PASSWORD</code>）登录 → 落到 <code>/admin</code></li>
+<li><code>/admin</code> 里新建一个普通用户 → 用新账号登录 → 上传一段 1–2 分钟视频 → 进度页走完 → 报告有真实分数与改进建议</li>
+<li>上传一个 <strong>超过 <code>MAX_VIDEO_MB</code>（这台 2C2G 生产机上是 200 MB，<code>env.production</code> 的收紧值；应用出厂默认 500）</strong> 的文件 → 应看到<strong>应用自己</strong>的"文件过大"提示，而不是 nginx 的 413 空白页。看到 413 说明 <code>client_max_body_size</code> 与 <code>.env</code> 没对齐</li>
+<li>再上传一个 <strong>超过 <code>COMPRESS_TARGET_MB</code>（默认 50 MB）但没到上限</strong> 的文件 → 进度页会先走到「自动压缩到目标体积」，页头标出"原始 XX MB，已自动压缩"；报告页体积后带"（压缩前 XX MB）"，质控记录里写明压到多少、码率多少。<strong>这一步是验收压缩链路，最省事的测法是手机录一段 4K 或长时间视频</strong></li>
+<li>手机用 <strong>移动数据（不要连家里 WiFi）</strong> 访问同一地址，重复第 3 步 —— 这一步同时验收移动端适配和真实公网带宽体验</li>
+</ol>
+<h3 id="44-上线后必做">4.4 上线后必做</h3>
+<ul>
+<li><strong>改管理员口令</strong>：必须登录后在 <code>/settings</code> 改（保存时会把新哈希回写数据库）。
+  <strong>直接编辑 <code>.env</code> 的 <code>ADMIN_PASSWORD</code> 再重启是不生效的</strong> —— <code>init_db</code> 只在管理员账号不存在时用它建号，口令哈希存在数据库里。忘了口令见第 11 节末尾的救法。</li>
+<li><strong>自助注册是关闭的</strong>：访问 <code>/register</code> 会被送回登录页并提示"账号由管理员统一开通"。给用户开号在 <code>/admin</code>：单个新建，或下载 Excel 模板批量导入</li>
+<li><strong>立刻备份一次</strong>：<code>bash /opt/speech-assist/deploy/backup.sh</code></li>
+<li><strong>配上每日备份</strong>（第 9 节）</li>
+</ul>
+<hr />
+<h2 id="5-日常运维命令">5. 日常运维命令</h2>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-10">复制代码</button></div><div class="codeslot" id="code-10"><div class="codehilite"><pre><span></span><span class="nv">S</span><span class="o">=</span>speech-assist
+
+systemctl<span class="w"> </span>status<span class="w"> </span><span class="nv">$S</span><span class="w"> </span>--no-pager<span class="w">            </span><span class="c1"># 状态 + 最近日志</span>
+systemctl<span class="w"> </span>restart<span class="w"> </span><span class="nv">$S</span><span class="w">                      </span><span class="c1"># 改完 .env 里非热生效项后用</span>
+journalctl<span class="w"> </span>-u<span class="w"> </span><span class="nv">$S</span><span class="w"> </span>-f<span class="w">                       </span><span class="c1"># 实时日志</span>
+journalctl<span class="w"> </span>-u<span class="w"> </span><span class="nv">$S</span><span class="w"> </span>--since<span class="w"> </span><span class="s2">&quot;10 min ago&quot;</span><span class="w"> </span>--no-pager
+
+nginx<span class="w"> </span>-t<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>systemctl<span class="w"> </span>reload<span class="w"> </span>nginx<span class="w">        </span><span class="c1"># 改 nginx 配置：先 -t 再 reload（reload不断流）</span>
+tail<span class="w"> </span>-f<span class="w"> </span>/var/log/nginx/speech-assist.access.log
+tail<span class="w"> </span>-f<span class="w"> </span>/var/log/nginx/speech-assist.error.log
+
+free<span class="w"> </span>-h<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>df<span class="w"> </span>-h<span class="w"> </span>/opt/speech-assist<span class="w">       </span><span class="c1"># 内存与磁盘</span>
+du<span class="w"> </span>-sh<span class="w"> </span>/opt/speech-assist/data/*<span class="w">          </span><span class="c1"># 数据目录分别多大</span>
+</pre></div></div></div>
+<p><strong>改配置有两种做法</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>改什么</th>
+<th>怎么做</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>大部分参数（模型、帧策略、并发、超时、开关、提示词、评分标准）</td>
+<td>登录后在 <code>/settings</code> 网页改，保存即写回 <code>.env</code> 并热生效</td>
+</tr>
+<tr>
+<td><code>WEB_THREADS</code></td>
+<td>进程启动时读取，必须 <code>systemctl restart speech-assist</code></td>
+</tr>
+<tr>
+<td><code>DATA_DIR</code> / <code>ENV_FILE</code></td>
+<td>同上，重启（换独立数据盘时见第 7.3 节）</td>
+</tr>
+<tr>
+<td>端口 / 反代结构</td>
+<td>改 <code>/etc/systemd/system/speech-assist.service</code> 或 <code>/etc/nginx/conf.d/speech-assist.conf</code>，然后 <code>daemon-reload</code> + <code>nginx -t</code> + restart</td>
+</tr>
+<tr>
+<td><code>SECRET_KEY</code></td>
+<td>可以换，但<strong>换完所有人登录态失效</strong>，需要重新登录</td>
+</tr>
+<tr>
+<td><code>TTS_VC_MODEL</code></td>
+<td>可以换（换完立即生效），但<strong>换的那一刻起所有已建好的复刻音色全部判作废</strong>：页面会显示"要重做"，学生重做一次即可。旧音色不会自动去远端删除，要清就得让学生自己点删除</td>
+</tr>
+<tr>
+<td><code>VOICE_CLONE_ENABLED</code></td>
+<td>填 <code>0</code> 只是<strong>关掉入口</strong>（报告页复刻节整段隐藏、授权/创建/删除三个 POST 一起拒绝），<strong>不会删掉任何已授权记录或已建好的音色</strong>；填回 <code>1</code> 后学生原来的音色照样能用，删除权始终在学生自己手里</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>手工改 <code>.env</code> 时不要改成 <code>CRLF</code>，也不要引入 BOM；应用会尽量兼容，但没必要制造变量。</p>
+</blockquote>
+<hr />
+<h2 id="6-开机自启、宕机自愈、任务恢复">6. 开机自启、宕机自愈、任务恢复</h2>
+<p>已在 unit 里配好，无需操作：</p>
+<ul>
+<li><code>Restart=always</code> + <code>RestartSec=3</code>：进程崩了 3 秒后自动拉起</li>
+<li><code>systemctl enable</code>：开机自启（<code>install.sh</code> 已做）</li>
+<li><code>TimeoutStopSec=30</code> + <code>SIGTERM</code>：优雅停止</li>
+<li>停止/重启时正在跑的分析任务，会在下次启动时被 <code>reset_stale_jobs()</code> 标成"已中断"，用户在进度页点<strong>重试</strong>即可 —— 这是设计行为，不是数据丢失</li>
+</ul>
+<p>想验证自愈能力（低峰期做）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-11">复制代码</button></div><div class="codeslot" id="code-11"><div class="codehilite"><pre><span></span><span class="nb">kill</span><span class="w"> </span><span class="k">$(</span>pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s1">&#39;uvicorn app.main:app&#39;</span><span class="k">)</span><span class="w">     </span><span class="c1"># 杀掉进程</span>
+sleep<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>systemctl<span class="w"> </span>is-active<span class="w"> </span>speech-assist<span class="w"> </span><span class="c1"># 应为 active</span>
+</pre></div></div></div>
+<hr />
+<h2 id="7-磁盘与数据（这台机器最需要盯的东西）">7. 磁盘与数据（<strong>这台机器最需要盯的东西</strong>）</h2>
+<p>系统盘 <strong>40 GiB</strong>。安装完成后：系统 + nginx + venv + ffmpeg 约占 6–8 GiB，可用大约 30 GiB。</p>
+<h3 id="71-什么在吃磁盘">7.1 什么在吃磁盘</h3>
+<p>一个视频会落两份：</p>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>内容</th>
+<th>体量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data/videos/</code></td>
+<td>上传的视频（用于回看与下载）。<strong>超过 <code>COMPRESS_TARGET_MB</code> 的已经是压缩后的 MP4，原件在压缩成功那一刻就删了</strong></td>
+<td>≈ min(原文件, <code>COMPRESS_TARGET_MB</code>)</td>
+</tr>
+<tr>
+<td><code>data/artifacts/&lt;视频id&gt;/</code></td>
+<td><code>audio.wav</code> + 最多 <code>FRAME_COUNT_MAX</code> 张关键帧 + <code>cover.jpg</code></td>
+<td>每视频约 5–20 MB</td>
+</tr>
+<tr>
+<td><code>data/voices/&lt;user_id&gt;/</code></td>
+<td>声音复刻的<strong>临时</strong>样本 wav（10–20 秒、24kHz 单声道，约 0.5–1 MB）</td>
+<td>用完即删，正常恒为空目录；每个账号只留一副音色的<strong>记录</strong>（在 SQLite 里，不占这份磁盘）</td>
+</tr>
+</tbody>
+</table>
+<p>粗算（<code>COMPRESS_TARGET_MB=50</code>）：平均每人每次上传约吃掉 <strong>55–70 MB</strong>，<code>USER_UPLOAD_LIMIT=5</code>（每人保留 5 个视频），10 个人用满约 3 GB。
+没开压缩时按上限算就是另一回事了：200 MB 上限 × 5 个 × 10 人 ≈ 10 GB 起步，所以<strong>这台机器上不要把 <code>COMPRESS_TARGET_MB</code> 填 0</strong>。</p>
+<p>临时占地：压缩过程中会在 <code>data/videos/</code> 里写两类临时文件 —— 一份 <code>&lt;原名片段&gt;.compressing.mp4</code>（压好的成品，大小 ≈ 目标体积）和若干 <code>&lt;原名片段&gt;.compressing.pass0.log*</code>（两遍编码的统计文件，几 MB 以内）。<strong>峰值占用 = 原文件 + 目标体积</strong>，所以 200 MB 的原片在最坏瞬间要 250 MB 空闲。正常结束和报错都会清掉临时文件；只有进程被 <code>kill -9</code> 才可能残留，看到 <code>.compressing</code> 开头的直接删（数据库里不会引用它们）。</p>
+<h3 id="72-关键事实：系统没有任何自动清理">7.2 关键事实：<strong>系统没有任何自动清理</strong></h3>
+<p>视频与中间产物只在用户主动删除时才会消失。<strong>必须</strong>做磁盘监控，否则磁盘写满后的症状是：SQLite 报 <code>database or disk is full</code>，上传失败，且服务可能反复重启。</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-12">复制代码</button></div><div class="codeslot" id="code-12"><div class="codehilite"><pre><span></span><span class="c1"># 每天看一次（或接你的云监控告警：磁盘使用率 &gt; 80% 报警）</span>
+df<span class="w"> </span>-h<span class="w"> </span>/opt/speech-assist<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1
+du<span class="w"> </span>-sh<span class="w"> </span>/opt/speech-assist/data/videos<span class="w"> </span>/opt/speech-assist/data/artifacts
+
+<span class="c1"># 找出最占地方的视频（文件名里带 user id 与上传时间戳）</span>
+ls<span class="w"> </span>-lS<span class="w"> </span>/opt/speech-assist/data/videos<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-20
+</pre></div></div></div>
+<h3 id="73-三种扩容方案">7.3 三种扩容方案</h3>
+<ol>
+<li><strong>控制台扩容系统盘</strong>（推荐，最省事）：ESSD 支持在线扩容 → 阿里云控制台"云盘扩容" → 服务器里 <code>growpart /dev/vda 1 &amp;&amp; resize2fs /dev/vda1</code>（分区号按 <code>lsblk</code> 实际输出）</li>
+<li><strong>挂数据盘并把数据目录迁过去</strong>：把盘挂到 <code>/data</code>，然后在 unit 里改一行
+   <div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-13">复制代码</button></div><div class="codeslot" id="code-13"><div class="codehilite"><pre><span></span><span class="w">   </span><span class="c1"># /etc/systemd/system/speech-assist.service</span>
+<span class="w">   </span><span class="nv">Environment</span><span class="o">=</span><span class="nv">DATA_DIR</span><span class="o">=</span>/data/speech-assist-data
+<span class="w">   </span><span class="c1"># 迁移：systemctl stop speech-assist</span>
+<span class="w">   </span><span class="c1">#       mkdir -p /data/speech-assist-data &amp;&amp; mv /opt/speech-assist/data/* /data/speech-assist-data/</span>
+<span class="w">   </span><span class="c1">#       chown -R speech:speech /data/speech-assist-data</span>
+<span class="w">   </span><span class="c1">#       systemctl daemon-reload &amp;&amp; systemctl start speech-assist</span>
+</pre></div></div></div></li>
+<li><strong>降容量</strong>：在 <code>/settings</code> 把 <code>COMPRESS_TARGET_MB</code> 降到 30（新上传的才会压到这个体积，热生效）、<code>MAX_VIDEO_MB</code> 降到 100、<code>USER_UPLOAD_LIMIT</code> 降到 3。<strong>降压缩目标比降上传上限有用</strong>：上限只影响拒收，目标才是决定每个文件真正占多少磁盘的那个数</li>
+</ol>
+<h3 id="74-清理谁的数据">7.4 清理谁的数据</h3>
+<p><strong>不要直接 <code>rm</code> 文件</strong> —— 数据库里会留下指向已消失文件的记录。正确做法：让对应用户在页面上删除视频（走 <code>/videos/{id}/delete</code>，会同时删记录与文件），或在 <code>/admin</code> 里删用户。</p>
+<p>只有确认是<strong>孤儿文件</strong>（数据库里没有对应记录）时，才手工清：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-14">复制代码</button></div><div class="codeslot" id="code-14"><div class="codehilite"><pre><span></span>sqlite3<span class="w"> </span>/opt/speech-assist/data/speech.db<span class="w"> </span><span class="s1">&#39;select file_path from videos;&#39;</span><span class="w"> </span><span class="c1"># 有记录的合法文件</span>
+<span class="c1"># 比对 ls 结果，只删不在列表里的</span>
+</pre></div></div></div>
+<blockquote>
+<p><code>sqlite3</code> 若未安装：<code>apt-get install -y sqlite3</code>。日常不需要，备份脚本用的是 Python 标准库。</p>
+</blockquote>
+<hr />
+<h2 id="8-升级与回滚">8. 升级与回滚</h2>
+<p>升级 = 重新打一个包，然后跑 <code>update.sh</code>。</p>
+<div class="codeline"><div class="bar"><span class="chip">powershell</span><button type="button" class="btn cp-btn" data-target="code-15">复制代码</button></div><div class="codeslot" id="code-15"><div class="codehilite"><pre><span></span><span class="c"># 本地</span>
+<span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="o">-File</span> <span class="n">deploy</span><span class="p">\</span><span class="n">package</span><span class="p">.</span><span class="n">ps1</span>
+<span class="n">scp</span> <span class="n">dist</span><span class="p">\</span><span class="n">speech-assist</span><span class="p">-</span><span class="n">20260928</span><span class="p">.</span><span class="n">tar</span><span class="p">.</span><span class="n">gz</span> <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">root</span><span class="p">/</span>
+</pre></div></div></div>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-16">复制代码</button></div><div class="codeslot" id="code-16"><div class="codehilite"><pre><span></span><span class="c1"># 服务器：参数可以给 tar.gz，也可以给已解压的目录</span>
+<span class="nb">cd</span><span class="w"> </span>/opt/speech-assist
+sudo<span class="w"> </span>bash<span class="w"> </span>deploy/update.sh<span class="w"> </span>/root/speech-assist-20260928.tar.gz
+</pre></div></div></div>
+<p><code>update.sh</code> 的流程（顺序很重要）：</p>
+<ol>
+<li><code>deploy/backup.sh</code> —— <strong>升级前自动备份</strong>（数据库 + <code>.env</code> + 密钥 + 提示词/评分标准）</li>
+<li><code>rsync -a --delete</code> 同步代码，同样保护 <code>.env</code> / <code>api_key.txt</code> / <code>data/</code> / <code>.venv</code> / <code>backups/</code>。同步前先读旧 <code>BUILD_INFO.json</code>、同步后读新的，打印"代码指纹：old -&gt; new"；<strong>新包没带指纹、指纹是 <code>unknown</code>、或新旧一致，都会显式警告</strong>（"没变"通常意味着传错包或忘了重新打包）</li>
+<li><code>pip install -r requirements.txt</code> 补依赖变化</li>
+<li>从<strong>已安装的 unit 里</strong>读回 <code>--host/--port</code>，重新渲染 systemd / nginx 配置，保证端口不漂移</li>
+<li><code>nginx -t</code> <strong>先校验再启用</strong>（失败自动回滚旧配置），<code>systemctl restart speech-assist</code></li>
+<li>轮询 <code>/health</code> 判定成功，并把返回的 <code>version</code> 与第 2 步的新指纹<strong>对账</strong>——对不上判失败。这一段是"假升级"的终结者：<code>/health</code> 一切正常但跑的还是旧代码的情况，从此会被脚本自己抓出来</li>
+</ol>
+<p>服务中断时间约 3–8 秒（reload nginx 不中断，restart 应用会中断）。低峰期执行。</p>
+<p><strong>新增的配置键不会自动出现在老 <code>.env</code> 里</strong>：rsync 保护 <code>.env</code> 意味着升级后它仍是原来那份。缺的键走内置默认值（声音复刻这一对的新默认是 <code>VOICE_CLONE_ENABLED=1</code> + <code>TTS_VC_MODEL=qwen3-tts-vc-2026-01-22</code>，也就是<strong>新功能默认开着</strong>，只想维持旧行为的要在升级后补 <code>VOICE_CLONE_ENABLED=0</code>；本次新增的 <code>REVISE_TIMEOUT</code> 缺省即 600 秒、<code>TOPIC_MATCH_THRESHOLD</code> 缺省即 0.6，都不必补），或者登录后进 <code>/settings</code> 拉到底保存一次 —— 页面必然提交全部 47 项，缺的键会被原样追加到 <code>.env</code> 末尾（保留注释、顺序与换行风格），这也是最省事的补齐办法。</p>
+<p><strong>回滚</strong>：备份里有数据库与配置，代码回滚 = 用旧包再跑一次 <code>update.sh /root/speech-assist-&lt;旧日期&gt;.tar.gz</code>。数据库回滚：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-17">复制代码</button></div><div class="codeslot" id="code-17"><div class="codehilite"><pre><span></span>systemctl<span class="w"> </span>stop<span class="w"> </span>speech-assist
+cp<span class="w"> </span>-a<span class="w"> </span>/opt/speech-assist/backups/&lt;时间戳&gt;/speech.db<span class="w"> </span>/opt/speech-assist/data/speech.db
+cp<span class="w"> </span>-a<span class="w"> </span>/opt/speech-assist/backups/&lt;时间戳&gt;/.env<span class="w"> </span>/opt/speech-assist/.env
+systemctl<span class="w"> </span>start<span class="w"> </span>speech-assist
+</pre></div></div></div>
+<hr />
+<h2 id="9-备份">9. 备份</h2>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-18">复制代码</button></div><div class="codeslot" id="code-18"><div class="codehilite"><pre><span></span>bash<span class="w"> </span>/opt/speech-assist/deploy/backup.sh<span class="w">              </span><span class="c1"># 默认输出 /opt/speech-assist/backups/&lt;时间戳&gt;</span>
+bash<span class="w"> </span>/opt/speech-assist/deploy/backup.sh<span class="w"> </span>--with-media<span class="w"> </span><span class="c1"># 连视频与关键帧一起（占磁盘翻倍，慎用）</span>
+<span class="nv">KEEP_DAYS</span><span class="o">=</span><span class="m">14</span><span class="w"> </span>bash<span class="w"> </span>/opt/speech-assist/deploy/backup.sh<span class="w"> </span><span class="c1"># 保留 14 天</span>
+</pre></div></div></div>
+<p>备份内容：<code>speech.db</code> + <code>.env</code> + <code>api_key.txt</code> + <code>提示词.json</code> + <code>评价标准.txt</code>（<code>--with-media</code> 时加 <code>media.tar.gz</code>）。备份后自动打印完整性检查结果与各表行数，并按 <code>KEEP_DAYS</code> 滚动清理。</p>
+<blockquote>
+<p>为什么不用 <code>cp speech.db</code>：数据库跑在 WAL 模式下，直接拷贝主库文件可能拿到"主库与 <code>-wal</code> 不一致"的半份快照。<code>backup.sh</code> 用 SQLite 的在线 <code>backup()</code> API，在锁内做页级一致性拷贝，<strong>不需要停服</strong>。</p>
+</blockquote>
+<p><strong>每天自动备份</strong>（root 的 crontab）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-19">复制代码</button></div><div class="codeslot" id="code-19"><div class="codehilite"><pre><span></span>crontab<span class="w"> </span>-e
+<span class="c1"># 加入这一行：每天 03:30</span>
+<span class="m">30</span><span class="w"> </span><span class="m">3</span><span class="w"> </span>*<span class="w"> </span>*<span class="w"> </span>*<span class="w"> </span>/bin/bash<span class="w"> </span>/opt/speech-assist/deploy/backup.sh<span class="w"> </span>&gt;&gt;<span class="w"> </span>/var/log/speech-backup.log<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</pre></div></div></div>
+<p><strong>备份别只放在同一台机器上</strong>（否则磁盘/实例一起没了就一起丢）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-20">复制代码</button></div><div class="codeslot" id="code-20"><div class="codehilite"><pre><span></span><span class="c1"># 每周同步到另一台机器 / NAS</span>
+rsync<span class="w"> </span>-a<span class="w"> </span>--delete<span class="w"> </span>/opt/speech-assist/backups/<span class="w"> </span>user@另一台机器:/backup/speech-assist/
+<span class="c1"># 或上传到阿里云 OSS（ossutil cp -r ...）</span>
+</pre></div></div></div>
+<p><strong>恢复演练</strong>（每季度做一次，备份没验证过等于没有备份）：在另一台机器上解压，把 <code>speech.db</code> 与 <code>.env</code> 放到 <code>data/</code> 与项目根，起服务确认能登录、报告能打开。</p>
+<hr />
+<h2 id="10-已知限制（提前告诉用户，比事后解释强）">10. 已知限制（提前告诉用户，比事后解释强）</h2>
+<table>
+<thead>
+<tr>
+<th>限制</th>
+<th>影响</th>
+<th>能做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>3 Mbps 出网（约 375 KB/s）</strong></td>
+<td><strong>两人同时在线回看视频会明显卡顿</strong>；一人看勉强，多人看必卡</td>
+<td>只能升带宽（阿里云按固定带宽计费，5 Mbps 约翻倍价格）；或让用户先看报告文字、需要时再单个回看；nginx 已配 <code>proxy_buffering off</code>，不浪费带宽在缓冲上</td>
+</tr>
+<tr>
+<td>2 vCPU <strong>共享型</strong>（无 SLA 抖动余量）</td>
+<td>分析是 ffmpeg 抽帧 + 网络等待，CPU 峰值短但会互相抢</td>
+<td><code>MAX_ANALYZERS=2</code> 已与"两人同时"对齐，不要调大</td>
+</tr>
+<tr>
+<td>自动压缩要占满 CPU</td>
+<td>超过 <code>COMPRESS_TARGET_MB</code> 的视频，分析前要先跑两遍 x264 编码。折算耗时 <strong>≈ 每分钟 1080p 素材 1~2 分钟</strong>（2 vCPU），即 3 分钟片子约 3~5 分钟、15 分钟约 15~20 分钟（来源见本节末）。这段时间该任务只占一个分析名额，别人的上传/看报告不受影响，但<strong>第二个人点分析会多等这么久</strong></td>
+<td>这是磁盘与带宽换来的必要代价（见 §7.1）。要更快只能：调大目标（压得少 → 传得快的问题仍在）、或换更大的机器（§12.5）。<strong>不要</strong>为了省 CPU 把目标填 0，那等于让 40 GB 系统盘直接面对 200 MB 的原片。可行性闸门会先替你拦一道：默认 <code>COMPRESS_TIMEOUT=1800</code> 下超过约 22 分钟的素材根本不会开压（"必超时"拦截，秒级失败），所以这段占 CPU 的时间有硬上界</td>
+</tr>
+<tr>
+<td>内存 2 GiB</td>
+<td>应用本身够用（实测 2 并发峰值 500–600 MB），但没有冗余</td>
+<td>已建 2 G swap 作 OOM 保险；<strong>绝对不要</strong>把 <code>ASR_ENGINE</code> 改成 <code>whisper</code></td>
+</tr>
+<tr>
+<td>单进程</td>
+<td>uvicorn 单进程 + FastAPI 线程池（<code>WEB_THREADS=32</code>），够撑住并发请求</td>
+<td>想扩容的正确方式是<strong>换更强的机器</strong>，不是加 worker</td>
+</tr>
+<tr>
+<td>HTTP 明文</td>
+<td>口令与视频走公网明文</td>
+<td>这是你选的方案。要收紧就上一张免费 DV 证书 + 域名（第 12.4 节）</td>
+</tr>
+<tr>
+<td>评分标准文件名硬编码</td>
+<td><code>评价标准.txt</code> 必须在应用根目录，不能用环境变量指向别处</td>
+<td>别改这个文件名</td>
+</tr>
+<tr>
+<td>数据只在本地磁盘</td>
+<td>实例被释放 = 数据全丢</td>
+<td>第 9 节的异地备份</td>
+</tr>
+<tr>
+<td>「示范朗读」按<strong>字符计费</strong>且必须在线</td>
+<td>每点一次「合成朗读」就是一次真实的大模型调用；稿件按 <code>TTS_CHUNK_CHARS</code>（默认 1600 字）切块、逐块请求，<strong>演绎指令随每块重复发送并计入 <code>characters</code></strong>，反复重合成会放大账单</td>
+<td>不要就把 <code>TTS_ENABLED</code> 填 <code>0</code>（页面只留文字稿，不显示合成入口）；换音色 <code>TTS_VOICE</code>（默认 <code>Neil</code>，女声 <code>Cherry</code>）；要省钱就调小 <code>TTS_MAX_CHUNKS</code>。同理 <code>REVISE_ENABLED=0</code> 可整块关掉改稿建议。两键都是新增能力，填 0 即退回旧行为</td>
+</tr>
+<tr>
+<td>「我的音色」声音复刻按<strong>次</strong>计费且必须在线</td>
+<td>每建一次音色 = 一次 <code>qwen-voice-enrollment</code> 调用，记在 <code>creations</code> 里不吃 token；样本只取自学生勾选「就用这一段」的那条视频，抽完即删（磁盘上不成人声库），授权时间、样本出处、绑定模型三样都留痕。<strong>入口关掉 ≠ 数据删除</strong>：<code>VOICE_CLONE_ENABLED=0</code> 只锁页面与三个 POST，已授权的记录和已建好的音色一概保留，填回 <code>1</code> 立刻能用；撤回授权会连带删音色，删音色不会反过来清授权留痕。音色绑在 <code>TTS_VC_MODEL</code> 上，管理员改这个键等于让全站的旧音色集体判作废（见第 5 节的改配置表）。设计取舍见设计报告.md §15.6，实现口径见方案文档 §9</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>"每分钟 1080p 素材 1~2 分钟"这个折算系数的来源</strong>（别当成拍脑袋的数字）：在 32 逻辑核的开发机上，用 <code>testsrc2</code> 合成一段 60 秒 / 1920x1080 / 25fps 的片段（43.2 MB），设目标 20 MB 跑真实两遍编码，结果是 <strong>19.0 MB、耗时 5 秒、未降分辨率</strong>（保持 1080p 原生，视频码率 2656 kbps）。按核数线性折算到 2 vCPU 即 5 × 16 = <strong>80 秒 / 每分钟素材</strong>。这个折算偏保守：x264 的多线程是次线性扩展（核数少时单核效率更高），而 <code>testsrc2</code> 是满屏噪点，比真人讲话的固定机位画面难压得多。<strong>手机竖屏 720p 的实际耗时通常只有上面数字的一半上下</strong>（像素少一半，而且多数会被阶梯降到低一档）。</p>
+<hr />
+<h2 id="11-故障排查表">11. 故障排查表</h2>
+<table>
+<thead>
+<tr>
+<th>症状</th>
+<th>先查</th>
+<th>大概率原因与修法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>浏览器打不开，一直转圈</td>
+<td>本机 <code>curl -s http://127.0.0.1/login -o /dev/null -w '%{http_code}\n'</code></td>
+<td>本机 200 而外网不通 = <strong>安全组没放行 80</strong>；本机也拒绝 = 服务没起，<code>journalctl -u speech-assist -n 50</code></td>
+</tr>
+<tr>
+<td>403 且 URL 是 <code>/health</code></td>
+<td>—</td>
+<td>正常，nginx 故意只允许 127.0.0.1</td>
+</tr>
+<tr>
+<td>上传大文件报 <strong>413</strong></td>
+<td><code>grep client_max_body_size /etc/nginx/conf.d/speech-assist.conf</code></td>
+<td>nginx 限制小于 <code>MAX_VIDEO_MB</code>。改 <code>.env</code> 后<strong>必须重跑</strong> <code>install.sh</code>（它会重算并渲染 nginx 配置）+ <code>systemctl reload nginx</code></td>
+</tr>
+<tr>
+<td>上传时要等一两分钟才跳转，用户以为死机</td>
+<td><code>journalctl -u speech-assist \| grep '\[上传\]' \| tail</code></td>
+<td>先看这一行的<strong>接收</strong>段。生产机实测一行：<code>[上传] heyun 36.1 MB｜接收 97.46s（ 0.4 MB/s） 转存 0.05s …｜… → /videos/…（自动分析）</code>——接收占 99% 以上 = 3 Mbps 出网把传输时间摊给了用户（第 10 节），本项目自己的三段合计不到 0.1 s，<strong>不是故障，服务端也无从优化</strong>。想变快只能升带宽或调小 <code>COMPRESS_TARGET_MB</code>；只有"转存/入库/入队"占大头才需要继续查服务端。前端已改为点提交后原地显示上传进度（百分比 / 已传与总体积 / 实时速度 / 预计剩余 / 取消按钮，设计报告 §8.5），等待至少可见；<strong>若页面长期停在"正在建立连接…"</strong>，多半是这台机器到服务器的上行更慢，不是接口挂了。另注意 97 s 的接收已逼近 nginx <code>proxy_read_timeout 300s</code>，接近 100 MB 的文件有 504 风险，要么同步放大该值，要么压小体积</td>
+</tr>
+<tr>
+<td>上传报"网络错误"、页面卡住</td>
+<td><code>journalctl -u speech-assist -n 50</code></td>
+<td>多半是 <code>REQUEST_TIMEOUT</code> 大于 nginx <code>proxy_read_timeout</code>（模板里已是 300s &gt; 180s）。若你调大了超时，两边要一起调。<code>REVISE_TIMEOUT=600</code> 不在此列——修订生成是后台任务，HTTP 请求秒回、页面轮询拿进度，慢调用不占用任何一条 nginx 连接</td>
+</tr>
+<tr>
+<td>报告分数是演示数据</td>
+<td><code>/health</code> 的 <code>mode</code></td>
+<td><code>mock</code>：<code>api_key.txt</code> 缺失/不可读（<code>chown speech:speech</code> + <code>chmod 600</code>）或 key 无效（<code>key_is_valid</code> 要求长度 ≥ 12）</td>
+</tr>
+<tr>
+<td>分析失败，错误里带「ffmpeg 压缩失败」或「两遍编码后仍有 XX MB」</td>
+<td><code>/health</code> 的 <code>ffmpeg</code>、<code>.env</code> 的 <code>COMPRESS_TARGET_MB</code></td>
+<td>压缩是<strong>显式失败</strong>，原文件保留着，不会静默按超限体积继续跑。<code>ffmpeg: false</code> → <code>apt-get install -y ffmpeg</code> + 重启；ffmpeg 在但报"两遍编码后仍有"→ 目标压得太狠（比如要求把 1 小时 1080p 压进 20 MB），把 <code>COMPRESS_TARGET_MB</code> 调大或让用户重传短一点的片段。两种情况都可以在页面上直接点「重新分析」重试，不用搬文件</td>
+</tr>
+<tr>
+<td>分析只失败了几秒，错误含「这个时长至少需要 X MB」或「必然被中断」</td>
+<td>视频的实际时长、<code>.env</code> 的 <code>COMPRESS_TARGET_MB</code> / <code>COMPRESS_TIMEOUT</code></td>
+<td>这是<strong>可行性闸门</strong>在 ffmpeg 启动前的正常拦截（设计报告 §5.1.3），不是故障：长视频压不进 50 MB 或必超时，早失败比跑半小时被 kill 好。出路按错误提示来——让用户剪辑分段，或调大 <code>COMPRESS_TARGET_MB</code> / <code>COMPRESS_TIMEOUT</code>（网页即可改）。<strong>原文件保留</strong>。确认误拦可把 <code>COMPRESS_FEASIBILITY</code> 填 <code>0</code> 退回旧行为</td>
+</tr>
+<tr>
+<td>大视频分析卡在「自动压缩到目标体积」很久</td>
+<td><code>journalctl -u speech-assist -f</code>、<code>top</code> 里 ffmpeg 的 CPU</td>
+<td>正常现象：两遍编码要占满 CPU（见第 10 节）。进度条会一直动，<strong>每一遍</strong>各按 <code>COMPRESS_TIMEOUT</code> 计时，超一遍就报错并保留原文件。闸门已把"必超时"的长件提前拦掉，能走到这一步的理论上都在预算内</td>
+</tr>
+<tr>
+<td>网页能开但分析一直"排队中"</td>
+<td><code>/health</code> 的 <code>concurrency.running</code></td>
+<td>前面任务卡在网络请求上（<code>REQUEST_TIMEOUT=180</code> 最长 3 分钟）。确认出网可达 <code>dashscope.aliyuncs.com</code>：<code>curl -sI https://dashscope.aliyuncs.com</code></td>
+</tr>
+<tr>
+<td>服务反复重启</td>
+<td><code>journalctl -u speech-assist --since "-10 min"</code></td>
+<td>看到 <code>Killed</code>/<code>OOM</code> → <code>free -h</code> 查内存，确认 swap 已生效：<code>swapon --noheadings</code></td>
+</tr>
+<tr>
+<td><code>/settings</code> 保存失败</td>
+<td>unit 里有没有 <code>ProtectSystem=strict</code></td>
+<td>该应用需要写代码目录。<strong>不要</strong>加 <code>ProtectHome</code> / <code>ProtectSystem=strict</code></td>
+</tr>
+<tr>
+<td>登录成功但刷新又掉线</td>
+<td>浏览器是否禁 Cookie</td>
+<td><code>SESSION_DAYS=7</code>；若手工给 Cookie 加了 <code>secure=True</code> 而用 HTTP 访问会立刻失效 —— 保持现状（只有 <code>httponly</code> + <code>samesite=lax</code>）</td>
+</tr>
+<tr>
+<td><code>install.sh</code> 报 <code>bash\r</code> / <code>$'\r': command not found</code></td>
+<td><code>file deploy/install.sh</code></td>
+<td>CRLF 没转 LF。用 <code>package.ps1</code> 重新打包，或在服务器 <code>sed -i 's/\r$//' deploy/*.sh</code></td>
+</tr>
+<tr>
+<td>健康检查 500，日志里 <code>AttributeError: module 'cv2' has no attribute 'CascadeClassifier'</code></td>
+<td><code>/opt/speech-assist/.venv/bin/pip show opencv-python-headless</code></td>
+<td>装到了 <strong>OpenCV 5.x</strong>：5.0 起 Haar 级联移出主 wheel，<code>import cv2</code> 成功也没有 <code>CascadeClassifier</code>。新版 <code>requirements.txt</code> 已锁 <code>&gt;=4.10,&lt;5</code>，重跑 <code>install.sh</code> 会自动降级；应急就 <code>pip install 'opencv-python-headless&gt;=4.10,&lt;5'</code> + <code>systemctl restart speech-assist</code>（代码侧也已改成整块降级，最坏只是没有人脸指标）</td>
+</tr>
+<tr>
+<td>干净安装却报"unit 的 ExecStart 里出现 <code>--workers</code>"</td>
+<td>解压目录里 <code>sed -n '290,294p' deploy/install.sh</code> 有没有 <code>grep -vE</code></td>
+<td>用的是旧包：unit 模板<strong>注释</strong>里就写着 <code>--workers</code>，老断言整文件 grep 会误伤自己。重新用 <code>package.ps1</code> 打包上传</td>
+</tr>
+<tr>
+<td><code>nginx: [emerg] bind() ... address already in use</code></td>
+<td><code>ss -ltnp \| grep :80</code></td>
+<td>有别的站点占 80。换 <code>--listen-port 8080</code>，或先停掉占用者；<code>install.sh</code> 只删 Ubuntu 自带 default 站点，不会替你删业务站点</td>
+</tr>
+<tr>
+<td>手机访问慢但电脑快</td>
+<td>—</td>
+<td>带宽问题（第 10 节），不是移动端适配问题。先用电脑在<strong>同一移动网络</strong>下对比确认</td>
+</tr>
+<tr>
+<td>想确认线上到底在跑哪版代码 / 升级是否真生效</td>
+<td><code>curl -s http://127.0.0.1/health \| python3 -c "import sys,json;print(json.load(sys.stdin)['version'])"</code></td>
+<td>应等于本次打包时 <code>package.ps1</code> 末尾打印的短 sha；<code>update.sh</code> 全程输出里有"代码指纹：old -&gt; new"与最后的对账行。<code>unknown</code> = 线上还是没带指纹的旧包，升级一次即修复</td>
+</tr>
+</tbody>
+</table>
+<h3 id="111-忘了管理员口令（不影响普通用户）">11.1 忘了管理员口令（不影响普通用户）</h3>
+<p>口令是 PBKDF2-SHA256 哈希存在 <code>users.password_hash</code> 里的，没法"查看"，只能重置。用应用自己的虚拟环境直接改那一行（<strong>不要</strong>用 <code>delete from users</code> —— <code>videos.user_id</code> 是 <code>ON DELETE CASCADE</code>，会连带删掉该账号的视频与评价记录）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-21">复制代码</button></div><div class="codeslot" id="code-21"><div class="codehilite"><pre><span></span><span class="nb">cd</span><span class="w"> </span>/opt/speech-assist
+sudo<span class="w"> </span>-u<span class="w"> </span>speech<span class="w"> </span>.venv/bin/python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
+<span class="s">from app import db, security</span>
+
+<span class="s">new_pw = input(&quot;新口令: &quot;)          # 走 stdin 而非命令行参数：口令不进 shell 历史与 ps（仍会回显，注意旁观）</span>
+<span class="s">with db.get_conn() as c:</span>
+<span class="s">    row = c.execute(&quot;select id, username from users where role=&#39;admin&#39; order by id limit 1&quot;).fetchone()</span>
+<span class="s">    if row is None:</span>
+<span class="s">        print(&quot;没有管理员账号：改 .env 的 ADMIN_USERNAME/ADMIN_PASSWORD 后重启服务即可自动建号&quot;)</span>
+<span class="s">    else:</span>
+<span class="s">        c.execute(&quot;update users set password_hash=? where id=?&quot;, (security.hash_password(new_pw), row[0]))</span>
+<span class="s">        print(&quot;已重置管理员：&quot;, row[1])</span>
+<span class="s">PY</span>
+</pre></div></div></div>
+<p>改 <code>.env</code> 里的 <code>ADMIN_USERNAME</code> 再重启会<strong>多出一个管理员账号</strong>（<code>init_db</code> 按用户名判断存在性），而不是改名。要改名请在 <code>/settings</code> 里改，那里走的是 <code>sync_admin_login</code>，会重命名第一个管理员。</p>
+<p><strong>收集一份完整现场信息</strong>（贴给别人排查时用）：</p>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-22">复制代码</button></div><div class="codeslot" id="code-22"><div class="codehilite"><pre><span></span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== os&quot;</span><span class="p">;</span><span class="w"> </span>head<span class="w"> </span>-2<span class="w"> </span>/etc/os-release<span class="p">;</span><span class="w"> </span>python3<span class="w"> </span>-V
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== mem/disk&quot;</span><span class="p">;</span><span class="w"> </span>free<span class="w"> </span>-h<span class="p">;</span><span class="w"> </span>df<span class="w"> </span>-h<span class="w"> </span>/opt/speech-assist<span class="p">;</span><span class="w"> </span>swapon<span class="w"> </span>--noheadings
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== service&quot;</span><span class="p">;</span><span class="w"> </span>systemctl<span class="w"> </span>status<span class="w"> </span>speech-assist<span class="w"> </span>--no-pager<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-20
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== health&quot;</span><span class="p">;</span><span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1/health<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== app log&quot;</span><span class="p">;</span><span class="w"> </span>journalctl<span class="w"> </span>-u<span class="w"> </span>speech-assist<span class="w"> </span>-n<span class="w"> </span><span class="m">80</span><span class="w"> </span>--no-pager
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== nginx err&quot;</span><span class="p">;</span><span class="w"> </span>tail<span class="w"> </span>-20<span class="w"> </span>/var/log/nginx/speech-assist.error.log<span class="p">;</span><span class="w"> </span><span class="o">}</span><span class="w"> </span>&gt;<span class="w"> </span>/tmp/diag.txt<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</pre></div></div></div>
+<hr />
+<h2 id="12-常见变更怎么做">12. 常见变更怎么做</h2>
+<h3 id="121-换端口">12.1 换端口</h3>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-23">复制代码</button></div><div class="codeslot" id="code-23"><div class="codehilite"><pre><span></span>sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--listen-port<span class="w"> </span><span class="m">8080</span><span class="w">    </span><span class="c1"># 会重渲染 nginx 并 restart</span>
+<span class="c1"># 别忘了：安全组放行 8080</span>
+</pre></div></div></div>
+<h3 id="122-不要-nginx">12.2 不要 nginx</h3>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-24">复制代码</button></div><div class="codeslot" id="code-24"><div class="codehilite"><pre><span></span>sudo<span class="w"> </span>bash<span class="w"> </span>deploy/install.sh<span class="w"> </span>--no-nginx<span class="w"> </span>--listen-port<span class="w"> </span><span class="m">8080</span>
+<span class="c1"># 此时 uvicorn 直接监听 0.0.0.0:8080，安全组放行 8080</span>
+<span class="c1"># 代价：没有 gzip、没有安全响应头、/health 不对公网隔离、上传体积只受 MAX_VIDEO_MB 限制</span>
+</pre></div></div></div>
+<h3 id="123-把本地已有的数据搬上服务器">12.3 把本地已有的数据搬上服务器</h3>
+<div class="codeline"><div class="bar"><span class="chip">powershell</span><button type="button" class="btn cp-btn" data-target="code-25">复制代码</button></div><div class="codeslot" id="code-25"><div class="codehilite"><pre><span></span><span class="c"># 本地：先停本地服务，保证 sqlite 不处于写入状态</span>
+<span class="n">scp</span> <span class="n">data</span><span class="p">\</span><span class="n">speech</span><span class="p">.</span><span class="n">db</span> <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">opt</span><span class="p">/</span><span class="n">speech-assist</span><span class="p">/</span><span class="n">data</span><span class="p">/</span>
+<span class="n">scp</span> <span class="n">data</span><span class="p">\</span><span class="n">speech</span><span class="p">.</span><span class="n">db-wal</span> <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">opt</span><span class="p">/</span><span class="n">speech-assist</span><span class="p">/</span><span class="n">data</span><span class="p">/</span>   <span class="c"># 如果存在</span>
+<span class="n">scp</span> <span class="n">-r</span> <span class="n">data</span><span class="p">\</span><span class="n">videos</span>    <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">opt</span><span class="p">/</span><span class="n">speech-assist</span><span class="p">/</span><span class="n">data</span><span class="p">/</span>
+<span class="n">scp</span> <span class="n">-r</span> <span class="n">data</span><span class="p">\</span><span class="n">artifacts</span> <span class="n">root</span><span class="p">@&lt;</span><span class="n">公网IP</span><span class="p">&gt;:/</span><span class="n">opt</span><span class="p">/</span><span class="n">speech-assist</span><span class="p">/</span><span class="n">data</span><span class="p">/</span>
+</pre></div></div></div>
+<div class="codeline"><div class="bar"><span class="chip">bash</span><button type="button" class="btn cp-btn" data-target="code-26">复制代码</button></div><div class="codeslot" id="code-26"><div class="codehilite"><pre><span></span>chown<span class="w"> </span>-R<span class="w"> </span>speech:speech<span class="w"> </span>/opt/speech-assist/data
+systemctl<span class="w"> </span>restart<span class="w"> </span>speech-assist
+</pre></div></div></div>
+<blockquote>
+<p>搬过去之后<strong>老用户的口令仍然按本地哈希生效</strong>；<code>SECRET_KEY</code> 变了，所有人需要重新登录一次。
+注意 <code>.env</code> 里的 <code>MAX_VIDEO_MB</code> 若比本地小，历史大文件仍可回看，只是不能再上传更大的。</p>
+</blockquote>
+<h3 id="124-将来要-https（本次不做，留个路径）">12.4 将来要 HTTPS（本次不做，留个路径）</h3>
+<p>需要：一个已备案的域名（解析到这台机器的公网 IP）+ 一张证书（阿里云有免费 DV 证书，或用 certbot + Let's Encrypt）。
+改动：<code>/etc/nginx/conf.d/speech-assist.conf</code> 里加 <code>listen 443 ssl</code> + 证书两行 + 80 跳转 443；安全组放行 443。
+<strong>同时</strong>要把会话 Cookie 加上 <code>secure</code>（<code>app/main.py:207</code> 的 <code>_set_session</code>），否则 HTTPS 下白做。</p>
+<h3 id="125-换更大的机器">12.5 换更大的机器</h3>
+<p>机器规格变化后需要同步调的参数：<code>.env</code> 里 <code>MAX_ANALYZERS</code>、<code>MAX_LLM_REQUESTS</code>、<code>WEB_THREADS</code>，以及 <code>MAX_VIDEO_MB</code>（带宽提升后再放宽）。改完 <code>systemctl restart speech-assist</code>，并<strong>重跑 <code>install.sh</code></strong> 让 nginx 的 <code>client_max_body_size</code> 重新对齐。</p>
+<hr />
+<h2 id="13-部署产物清单（仓库里新增的-8-个文件）">13. 部署产物清单（仓库里新增的 8 个文件）</h2>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+<th>在服务器上落在哪</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deploy/package.ps1</code></td>
+<td>Windows 侧打发布包（白名单 + LF 归一 + 回环校验）</td>
+<td>不上传，本地用</td>
+</tr>
+<tr>
+<td><code>deploy/env.production</code></td>
+<td>2C2G 收紧过的配置模板（并发/体积/超时/带宽理由都在注释里）</td>
+<td>复制成 <code>/opt/speech-assist/.env</code></td>
+</tr>
+<tr>
+<td><code>deploy/speech-assist.service</code></td>
+<td>systemd 单元模板（单进程、<code>Restart=always</code>、沙箱只到 <code>ProtectSystem=full</code>）</td>
+<td>渲染到 <code>/etc/systemd/system/speech-assist.service</code></td>
+</tr>
+<tr>
+<td><code>deploy/nginx-speech-assist.conf</code></td>
+<td>反代模板（体积、流式、gzip、安全头、<code>/health</code> 内网化）</td>
+<td>渲染到 <code>/etc/nginx/conf.d/speech-assist.conf</code></td>
+</tr>
+<tr>
+<td><code>deploy/install.sh</code></td>
+<td>一键安装 + 验收 + 提示（幂等）</td>
+<td>跑完即可，留在包内无害</td>
+</tr>
+<tr>
+<td><code>deploy/update.sh</code></td>
+<td>升级（自动备份 → 同步 → 依赖 → 重渲染 → 健康检查）</td>
+<td>同步到 <code>/opt/speech-assist/deploy/</code></td>
+</tr>
+<tr>
+<td><code>deploy/backup.sh</code></td>
+<td>在线备份 + 滚动清理</td>
+<td>同步到 <code>/opt/speech-assist/deploy/</code>，配 cron</td>
+</tr>
+<tr>
+<td><code>deploy/部署手册.md</code></td>
+<td>就是这份文档</td>
+<td>随包同步到 <code>/opt/speech-assist/deploy/</code></td>
+</tr>
+</tbody>
+</table>
+<p>参数取值来源：并发与体积按 <strong>2 人同时使用 / 3 Mbps 出网</strong> 定，内存结论来自进程树峰值采样（selfcheck 219 MB / smoke_web 258 MB 量级），比 <code>设计报告.md</code> §16.4 的"十人档 8–16 核 / 16 GB"是<strong>刻意降级</strong>。</p>
+  </article></main>
+</div>
+
+<p class="pagefoot">本页由 <code>tools/build_html.py</code> 从 Markdown 源生成。改内容请改 <code>.md</code> 后重新生成，不要直接编辑 HTML。</p>
+<script>
+(function () {
+  var PAGE_NAME = "部署手册.html";
+  var seq = 0;
+
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._h);
+    t._h = setTimeout(function () { t.classList.remove('show'); }, 2200);
+  }
+
+  function copyText(text, label) {
+    function legacy() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.readOnly = true;
+      ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      toast(ok ? label + '已复制' : '复制失败，请手动选中');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(label + '已复制'); }, legacy);
+    } else { legacy(); }
+  }
+
+  function textOf(id) {
+    var el = document.getElementById(id);
+    if (!el) return '';
+    var pre = el.tagName === 'PRE' ? el : (el.querySelector('pre') || el);
+    return pre.innerText.replace(/\s+$/, '');
+  }
+
+  document.querySelectorAll('.cp-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      copyText(textOf(b.dataset.target), b.textContent.indexOf('源码') >= 0 ? 'mermaid 源码' : '代码');
+    });
+  });
+
+  document.querySelectorAll('.mmd-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var src = document.getElementById(b.dataset.target);
+      if (!src) return;
+      var fig = src.closest('figure.mmd');
+      var open = !fig.classList.contains('showsrc');
+      fig.classList.toggle('showsrc', open);
+      b.classList.toggle('on', open);
+      b.textContent = open ? '收起 mermaid 源码' : '取 mermaid 源码';
+    });
+  });
+
+  function zoomFig(fig, act) {
+    var svg = fig.querySelector('.stage svg');
+    if (!svg) return;
+    if (!fig.dataset.base) {
+      var w = Math.round(svg.getBoundingClientRect().width);
+      fig.dataset.base = String(w > 0 ? w : 640);
+    }
+    var z = parseFloat(fig.dataset.zoom || '1');
+    if (act === 'in') z = Math.min(3, Math.round((z + 0.25) * 100) / 100);
+    else if (act === 'out') z = Math.max(0.5, Math.round((z - 0.25) * 100) / 100);
+    else z = 1;
+    fig.dataset.zoom = String(z);
+    if (z === 1) { svg.style.maxWidth = ''; svg.style.width = ''; }
+    else { svg.style.maxWidth = 'none'; svg.style.width = (parseFloat(fig.dataset.base) * z) + 'px'; }
+    setState(fig, z === 1 ? '已渲染 · 源码可取' : '缩放 ' + Math.round(z * 100) + '%', z === 1 ? 'ok' : 'wait');
+  }
+  document.querySelectorAll('.z-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var fig = b.closest('figure.mmd');
+      if (fig) zoomFig(fig, b.dataset.act);
+    });
+  });
+
+  var CDNS = [
+    'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js',
+    'https://unpkg.com/mermaid@11/dist/mermaid.min.js'
+  ];
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  function setState(fig, text, kind) {
+    var st = fig.querySelector('.state');
+    if (st) { st.textContent = text; st.dataset.state = kind; }
+  }
+  (async function renderDiagrams() {
+    var figs = Array.prototype.slice.call(document.querySelectorAll('figure.mmd'));
+    if (!figs.length) return;
+    var loaded = false;
+    for (var i = 0; i < CDNS.length && !loaded; i++) {
+      try { await loadScript(CDNS[i]); loaded = !!window.mermaid; } catch (e) { loaded = false; }
+    }
+    if (!loaded) {
+      figs.forEach(function (f) { f.classList.add('off'); setState(f, '离线未渲染 · 下面直接显示 mermaid 源码，可点「复制源码」', 'off'); });
+      return;
+    }
+    var m = window.mermaid;
+    m.initialize({
+      startOnLoad: false, securityLevel: 'loose', theme: 'neutral',
+      fontFamily: '"Microsoft YaHei","SimHei",sans-serif',
+      flowchart: { htmlLabels: true, useMaxWidth: true, curve: 'linear' }
+    });
+    for (var k = 0; k < figs.length; k++) {
+      var fig = figs[k];
+      var stage = fig.querySelector('.stage');
+      var src = fig.querySelector('.mmdsrc');
+      stage.innerHTML = '';
+      try {
+        var out = await m.render('mmdSVG' + (seq++), src.textContent.trim());
+        stage.innerHTML = (typeof out === 'string') ? out : out.svg;
+        setState(fig, '已渲染 · 源码可取', 'ok');
+      } catch (err) {
+        stage.innerHTML = '<pre class="pending">' + src.textContent.replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        }) + '</pre>';
+        setState(fig, '渲染失败：' + ((err && err.message) || err), 'off');
+      }
+    }
+  })();
+
+  var links = Array.prototype.slice.call(document.querySelectorAll('#tocnav a'));
+  var pairs = links.map(function (a) {
+    return { a: a, h: document.getElementById(a.getAttribute('href').slice(1)) };
+  }).filter(function (p) { return !!p.h; });
+
+  var q = document.getElementById('q');
+  if (q) {
+    q.addEventListener('input', function () {
+      var v = q.value.trim().toLowerCase();
+      links.forEach(function (a) {
+        a.parentNode.classList.toggle('hide', v !== '' && a.textContent.toLowerCase().indexOf(v) < 0);
+      });
+    });
+  }
+
+  var tops = [];
+  function measure() { tops = pairs.map(function (p) { return p.h.getBoundingClientRect().top + window.pageYOffset - 80; }); }
+  var navSide = document.querySelector('nav.side');
+  var cur = -1;
+  function setActive(idx) {
+    cur = idx;
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (idx < 0 || !navSide) return;
+    var a = pairs[idx].a;
+    a.classList.add('active');
+    // 只在侧栏自己的滚动条上挪动，绝不碰文档滚动条：
+    // 用 scrollIntoView 会让 Chrome 连带滚动 viewport（nav 是 sticky 的，
+    // 它的可视位置随文档滚动变化，于是形成"跳过去又被拽回目录"的反馈）。
+    var nr = navSide.getBoundingClientRect(), ar = a.getBoundingClientRect();
+    if (ar.top < nr.top + 4) { navSide.scrollTop -= (nr.top + 4 - ar.top); }
+    else if (ar.bottom > nr.bottom - 4) { navSide.scrollTop += (ar.bottom - nr.bottom + 4); }
+  }
+  var suppressUntil = 0;
+  function spy() {
+    if (!tops.length) return;
+    if (Date.now() < suppressUntil) return;
+    var y = window.pageYOffset, idx = -1;
+    for (var i = 0; i < tops.length; i++) { if (tops[i] <= y) { idx = i; } else { break; } }
+    if (idx === cur) return;
+    setActive(idx);
+  }
+  pairs.forEach(function (p) {
+    p.a.addEventListener('click', function () {
+      setActive(pairs.indexOf(p));
+      // html{scroll-behavior:smooth} 让锚点跳转变成一段动画，动画途中的 scroll
+      // 事件会把高亮改到中途经过的章节上，这里先按住 800ms 不跑 spy。
+      suppressUntil = Date.now() + 800;
+    });
+  });
+  var queued = false;
+  window.addEventListener('scroll', function () {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; spy(); });
+  }, { passive: true });
+  window.addEventListener('resize', function () { measure(); spy(); });
+  measure(); spy();
+  window.addEventListener('load', function () { measure(); spy(); });
+
+  var dl = document.getElementById('btn-download');
+  if (dl) {
+    dl.addEventListener('click', function () {
+      var blob = new Blob(['<!DOCTYPE html>\n' + document.documentElement.outerHTML], { type: 'text/html;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = PAGE_NAME;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+      toast('已下载 ' + PAGE_NAME);
+    });
+  }
+  var pr = document.getElementById('btn-print');
+  if (pr) pr.addEventListener('click', function () { window.print(); });
+  var ex = document.getElementById('btn-expand');
+  if (ex) {
+    ex.addEventListener('click', function () {
+      var on = document.body.classList.toggle('showallsrc');
+      ex.classList.toggle('on', on);
+      ex.textContent = on ? '收起全部源码' : '展开全部源码';
+      document.querySelectorAll('figure.mmd').forEach(function (f) { f.classList.toggle('showsrc', on); });
+    });
+  }
+})();
+</script>
+</body>
+</html>
