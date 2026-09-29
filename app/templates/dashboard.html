@@ -24,17 +24,16 @@
     删掉下面任意一条记录即可返还一次名额；也可请管理员重置次数或为本账号单独放宽上限。
   </div>
   {% else %}
-  <form method="post" action="/videos" enctype="multipart/form-data">
-    <div class="grid-2">
-      <div class="field">
-        <label for="title">标题</label>
-        <input id="title" name="title" type="text" placeholder="留空则用文件名">
-      </div>
-      <div class="field">
-        <label for="topic">演讲题目 / 要求场合</label>
-        <input id="topic" name="topic" type="text" placeholder="例如：My view on AI（英语课 3 分钟演讲）">
-        <div class="hint">用于判断主题契合度，也用来解析时间要求（如 2–3 分钟）。</div>
-      </div>
+  <div class="alert" id="up-err" style="display:none;margin-bottom:14px"></div>
+  <form class="upload-form" id="upload-form" method="post" action="/videos" enctype="multipart/form-data">
+    <div class="field">
+      <label for="title">标题</label>
+      <input id="title" name="title" type="text" placeholder="留空则用文件名">
+    </div>
+    <div class="field">
+      <label for="topic">演讲题目 / 要求场合</label>
+      <textarea id="topic" name="topic" rows="2" placeholder="例如：My view on AI（英语课 3 分钟演讲）"></textarea>
+      <div class="hint">用于判断主题契合度，也用来解析时间要求（如 2–3 分钟）。整句题目可直接粘贴，会自动换行。</div>
     </div>
     <div class="field">
       <label for="requirements">老师的具体要求（可选）</label>
@@ -48,12 +47,32 @@
         <div style="margin-top:6px">mp4 / mov / webm / mkv / avi …，建议横屏、能听清人声</div>
       </div>
     </div>
-    <div class="row-actions" style="margin-top:18px">
-      <button class="btn" type="submit" name="auto" value="1">上传并开始分析</button>
+    <div class="row-actions">
+      <button class="btn" type="submit" id="upload-auto" name="auto" value="1">上传并开始分析</button>
       <button class="btn ghost" type="submit" name="auto" value="">仅上传</button>
       <span class="hint dim-text" style="font-family:var(--font-mono);font-size:11.5px">分析在后台进行，可离开页面。</span>
     </div>
   </form>
+  <div id="up-prog" style="display:none">
+    <div class="kicker">Upload</div>
+    <div class="section-title" style="margin-top:0">
+      <h2 id="up-title">正在上传</h2>
+      <span id="up-name">—</span>
+    </div>
+    <p class="lede" id="up-stage"><span class="spinner"></span> 正在建立连接…</p>
+    <div class="progress-rail" style="margin:18px 0 6px"><i id="up-rail" style="width:0%"></i></div>
+    <div class="pct-line">
+      <span id="up-pct" class="pct-big">0%</span>
+      <span id="up-meta" class="pct-meta">—</span>
+    </div>
+    <div class="alert" style="margin-top:20px">
+      <b>请勿刷新或关闭本页</b>：上传中断就得从头再传。传完后服务端只处理零点几秒，本页会自动跳到分析进度页；
+      分析本身在后台进行，跳过去之后就可以离开。
+    </div>
+    <div class="row-actions" style="margin-top:18px">
+      <button class="btn small ghost" type="button" id="up-cancel">取消上传</button>
+    </div>
+  </div>
   {% endif %}
 </section>
 
@@ -176,6 +195,192 @@
 {% endblock %}
 
 {% block script %}
+<script>
+(function () {
+  var MAX_MB = {{ max_mb | tojson }};
+  var form = document.getElementById('upload-form');
+  var prog = document.getElementById('up-prog');
+  var errBox = document.getElementById('up-err');
+  if (!form || !prog || !errBox) return;
+  if (!window.XMLHttpRequest || !window.FormData || !('upload' in new XMLHttpRequest())) return;
+
+  var nameEl = document.getElementById('up-name');
+  var stageEl = document.getElementById('up-stage');
+  var railEl = document.getElementById('up-rail');
+  var pctEl = document.getElementById('up-pct');
+  var metaEl = document.getElementById('up-meta');
+  var cancelBtn = document.getElementById('up-cancel');
+  var xhr = null;
+  var abortNow = null;
+  var lastBtn = null;
+
+  function mb(bytes) { return (bytes / 1048576).toFixed(1); }
+  function dur(s) {
+    if (!isFinite(s) || s <= 0) return '—';
+    s = Math.round(s);
+    if (s < 60) return s + ' 秒';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + ' 分 ' + (s % 60) + ' 秒';
+    return Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
+  }
+  function stage(text) { stageEl.innerHTML = '<span class="spinner"></span> ' + text; }
+  function back(msg) {
+    prog.style.display = 'none';
+    form.style.display = '';
+    railEl.style.width = '0%';
+    pctEl.textContent = '0%';
+    metaEl.textContent = '—';
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = '取消上传';
+    errBox.innerHTML = msg;
+    errBox.style.display = '';
+  }
+
+  window.addEventListener('beforeunload', function (e) {
+    if (!xhr) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  cancelBtn.addEventListener('click', function () { if (abortNow) abortNow(); });
+
+  /* 记下最后被点的提交按钮：老浏览器 submit 事件没有 e.submitter，靠这个还原「仅上传 / 自动分析」的差别 */
+  var autoBtns = form.querySelectorAll('button[name="auto"]');
+  for (var bi = 0; bi < autoBtns.length; bi++) {
+    autoBtns[bi].addEventListener('click', function () { lastBtn = this; });
+  }
+
+  function autoValue(submitter) {
+    if (submitter && submitter.name === 'auto') return submitter.value;
+    var def = document.getElementById('upload-auto');
+    return def ? def.value : '1';
+  }
+
+  function send(file, submitter) {
+    /* 必须把被点击的按钮一并交给 FormData，否则 name="auto" 的提交按钮不进表单，
+       服务端收到 auto="" → 不自动入队，视频停在 uploaded 等人手点「开始分析」。
+       第二参数不被支持的老浏览器会静默忽略，故 delete+append 兜底，强制补上正确的值。 */
+    var fd;
+    try { fd = new FormData(form, submitter); } catch (err) { fd = new FormData(form); }
+    fd.delete('auto');
+    fd.append('auto', autoValue(submitter));
+    var total = file.size;
+    var markT = new Date().getTime(), markLoaded = 0, speed = 0, done = false, settled = false;
+    xhr = new XMLHttpRequest();
+
+    function bail(msg) {
+      if (settled) return;
+      settled = true;
+      xhr = null;
+      abortNow = null;
+      back(msg);
+    }
+    abortNow = function () {
+      var x = xhr;
+      settled = true;
+      xhr = null;
+      abortNow = null;
+      back('已取消上传，视频没有提交；名额未占用，重新点一次即可，需从头再传。');
+      if (x) x.abort();
+    };
+
+    xhr.upload.addEventListener('progress', function (e) {
+      if (settled || done || !e.lengthComputable || !e.total) return;
+      var now = new Date().getTime();
+      var dt = (now - markT) / 1000;
+      if (dt >= 0.5) {
+        speed = (e.loaded - markLoaded) / dt;
+        markT = now;
+        markLoaded = e.loaded;
+      }
+      var pct = e.loaded / e.total * 100;
+      if (pct >= 99.9) {
+        done = true;
+        railEl.style.width = '100%';
+        pctEl.textContent = '100%';
+        metaEl.textContent = '已传 ' + mb(total) + ' / ' + mb(total) + ' MB';
+        stage('视频已传完，服务端正在入库入队，马上自动跳转…');
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = '正在收尾…';
+        return;
+      }
+      railEl.style.width = pct.toFixed(1) + '%';
+      pctEl.textContent = (pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+      stage('正在上传视频…请勿刷新本页');
+      metaEl.textContent = '已传 ' + mb(e.loaded) + ' / ' + mb(total) + ' MB · '
+        + (speed > 0 ? mb(speed) + ' MB/s · 还需 ' + dur((total - e.loaded) / speed) : '测速中…');
+    });
+
+    xhr.addEventListener('load', function () {
+      if (settled) return;
+      settled = true;
+      var loc = xhr.responseURL;
+      var st = xhr.status;
+      xhr = null;
+      abortNow = null;
+      if (st >= 200 && st < 400) {
+        railEl.style.width = '100%';
+        pctEl.textContent = '100%';
+        stage('上传完成，正在打开结果页…');
+        if (loc) { location.href = loc; } else { location.reload(); }
+        return;
+      }
+      back(st === 413
+        ? '文件太大，被服务器拒绝（上限 ' + MAX_MB + ' MB）。请先压缩或改录一段更短的。'
+        : '服务器返回 ' + st + '，视频没有入库。可重试一次；若反复失败请把这条编号发给管理员：<code>' + st + '</code>');
+    });
+    xhr.addEventListener('error', function () {
+      bail('上传中断：网络连接断了。请检查网络后重新提交，需从头再传。');
+    });
+    xhr.addEventListener('abort', function () {
+      if (settled) return;
+      settled = true;
+      xhr = null;
+      abortNow = null;
+      prog.style.display = 'none';
+      form.style.display = '';
+    });
+
+    xhr.open('POST', form.getAttribute('action') || '/videos', true);
+    xhr.send(fd);
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (xhr) return;
+    var submitter = e.submitter || lastBtn || null;
+    lastBtn = null;
+    var input = document.getElementById('video');
+    var file = input && input.files && input.files[0];
+    if (!file) return;
+    errBox.style.display = 'none';
+    form.style.display = 'none';
+    prog.style.display = '';
+    railEl.style.width = '0%';
+    pctEl.textContent = '0%';
+    nameEl.textContent = file.name + ' · ' + mb(file.size) + ' MB';
+    metaEl.textContent = '共 ' + mb(file.size) + ' MB';
+    stage('正在建立连接…');
+    try {
+      send(file, submitter);
+    } catch (err) {
+      xhr = null;
+      abortNow = null;
+      prog.style.display = 'none';
+      form.style.display = '';
+      errBox.innerHTML = '本页进度条不可用，已退回普通上传方式（传输期间不显示百分比）。';
+      errBox.style.display = '';
+      /* form.submit() 不带提交按钮，auto 会丢，用一个隐藏域把值补回表单 */
+      var hid = document.createElement('input');
+      hid.type = 'hidden';
+      hid.name = 'auto';
+      hid.value = autoValue(submitter);
+      form.appendChild(hid);
+      form.submit();
+    }
+  });
+})();
+</script>
 {% if videos | selectattr('status', 'in', ['queued', 'transcribing', 'analyzing']) | list | length > 0 %}
 <script>
 (function () {

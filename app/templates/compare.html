@@ -1,11 +1,32 @@
 {% extends "base.html" %}
 {% block title %}历次对比 · 演讲辅助评估系统{% endblock %}
 {% block body %}
-{% set chosen_ids = data | map(attribute='video') | map(attribute='id') | list %}
-{% set last3 = history[-3:] | map(attribute='id') | list | join(',') %}
-{% set last2 = history[-2:] | map(attribute='id') | list | join(',') %}
+{% set anchor = (data | reverse | list)[0]['video'] if mode and data else None %}
 
 {% if msg %}<section class="sheet" data-reveal="1"><div class="alert">{{ msg }}</div></section>{% endif %}
+{% if topic_sel %}
+<section class="sheet" data-reveal="1">
+  <div class="alert info">
+    已按主题「<b>{{ topic_sel['label'] }}</b>」对比最近 {{ topic_sel['times'] }} 次
+    （该主题共完成 {{ topic_sel['n'] }} 次分析，取时间最近的几次）。
+    <a class="btn link small" href="/compare">回到默认（最近三次）</a>
+  </div>
+</section>
+{% endif %}
+{% if mode and anchor and not topic_sel %}
+<section class="sheet" data-reveal="1">
+  <div class="alert info">
+    {% if mode == 'same' %}
+    已按<b>模糊同主题</b>圈选 {{ data | length }} 次（锚点：{{ anchor['title'] }}
+    {% if anchor['topic'] %} · 主题「{{ anchor['topic'] }}」{% endif %}）。
+    写法有空格、错字、「第 3 届 / 第三届」这类差异也会被归进来；主题相近但内容不同的不会被归并。
+    {% else %}
+    已按<b>主题分组</b>各取最新一次，共 {{ data | length }} 组做跨主题对照（锚点：{{ anchor['title'] }}）。
+    {% endif %}
+    <a class="btn link small" href="/compare">回到默认（最近三次）</a>
+  </div>
+</section>
+{% endif %}
 
 <section class="sheet" data-reveal="{{ 1 if not msg else 2 }}">
   <div class="kicker">Compare · 按评分标准逐项对照</div>
@@ -13,50 +34,58 @@
     <h2>历次演讲对比</h2>
     <span>已分析 {{ history | length }} 次 · 本页选 {{ data | length }} 次</span>
   </div>
-  <p class="lede">雷达图按「得分率」叠加，形状越接近外圈正七边形说明各维度越均衡；Δ 表按标准里的同一维度做绝对分差，不受视频难度影响。最多同时对比 6 次。</p>
+  <p class="lede">雷达图按「得分率」叠加，形状越接近外圈正七边形说明各维度越均衡；Δ 表按标准里的同一维度做绝对分差，不受视频难度影响。最多同时对比 5 次。</p>
 
   {% if history | length < 2 %}
     <div class="alert info" style="margin-top:16px">
       至少需要 <b>两次已完成分析</b> 才能对比。当前只有一次（或没有）。上传新视频并分析后回到这里。
     </div>
+  {% elif not topic_options %}
+    <div class="alert info" style="margin-top:16px">
+      已分析的几次都<b>没有填写主题或标题</b>，无法按主题归组。请编辑视频信息补上主题后再来对比。
+    </div>
   {% else %}
   <form method="get" action="/compare" style="margin-top:18px">
-    <div class="table-wrap pin-first" style="--table-min:620px">
-    <table class="sheet-table">
-      <thead>
-        <tr>
-          <th style="width:34px"></th>
-          <th>演讲</th>
-          <th class="num">分析时间</th>
-          <th class="num">总分</th>
-          <th style="width:64px">档位</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for h in history | reverse | list %}
-        <tr>
-          <td><input class="pick" type="checkbox" name="ids" value="{{ h['id'] }}"
-                     {{ 'checked' if h['id'] in chosen_ids }}></td>
-          <td>
-            <a href="/videos/{{ h['id'] }}" style="font-weight:700">{{ h['title'] }}</a>
-            {% if h['topic'] %}<span class="dim-text mono" style="font-size:11px"> · {{ h['topic'] }}</span>{% endif %}
-          </td>
-          <td class="num dim-text">{{ h['analyzed_at'] | dt }}</td>
-          <td class="num"><b>{{ h['total'] | g }}</b><span class="dim-text">/{{ h['max_total'] | g }}</span></td>
-          <td><span class="tag {{ 'tag-olive' if h['band'] in ['A','B'] else ('tag-amber' if h['band'] == 'C' else 'tag-seal') }}">{{ h['band'] }}</span></td>
-        </tr>
+    <div class="row-actions pick-bar">
+      <label class="dim-text" for="cmp-topic">选择主题</label>
+      <select id="cmp-topic" name="topic" class="pick-topic" data-times="{{ topic_sel['times'] if topic_sel else '' }}">
+        {% for o in topic_options %}
+        <option value="{{ o['anchor'] }}" data-n="{{ o['n'] }}" {{ 'selected' if topic_sel and topic_sel['anchor'] == o['anchor'] }}>{{ o['label'] }}（共 {{ o['n'] }} 次）</option>
         {% endfor %}
-      </tbody>
-    </table>
+      </select>
+      <label class="dim-text" for="cmp-times">对比次数</label>
+      <select id="cmp-times" name="times" class="pick-times"></select>
+      <button class="btn" type="submit">对比</button>
+      <noscript><a class="btn ghost small" href="/compare">默认（最近三次）</a></noscript>
     </div>
-    <div class="row-actions" style="margin-top:14px">
-      <button class="btn" type="submit">对比所勾选</button>
-      <a class="btn ghost small" href="/compare?ids={{ last3 }}">最近三次</a>
-      {% if history | length >= 2 %}<a class="btn ghost small" href="/compare?ids={{ last2 }}">最近两次</a>{% endif %}
-      <a class="btn ghost small" href="/compare">默认（最近三次）</a>
-      <span class="mono" style="font-size:11px;color:var(--ink-3)">未勾选时自动使用最近三次</span>
-    </div>
+    <p class="dim-text" style="font-size:12px;margin-top:10px">
+      主题按模糊匹配归组（相似度阈值 {{ '%.2f' % threshold }}）：空格、错字、「第 3 届 / 第三届」这类写法差异会归为同一主题。
+      每次取所选主题<b>时间最近的 N 次</b>放在一起对比，N 可选 1~5（选 1 次只回看那一场）；不同主题之间不做对比。
+    </p>
   </form>
+  <script>
+  (function () {
+    var t = document.getElementById('cmp-topic');
+    var n = document.getElementById('cmp-times');
+    if (!t || !n) return;
+    function fill() {
+      var cur = t.options[t.selectedIndex];
+      var max = Math.min(parseInt(cur ? cur.getAttribute('data-n') : '0', 10) || 0, 5);
+      var want = parseInt(t.getAttribute('data-times') || '0', 10) || 0;
+      t.title = cur ? cur.text.trim() : '';
+      n.innerHTML = '';
+      n.disabled = false;
+      for (var k = 1; k <= max; k++) {
+        var o = new Option('最近 ' + k + ' 次', String(k));
+        if (k === want) o.selected = true;
+        n.appendChild(o);
+      }
+      if (!want && max >= 1) n.value = String(Math.min(3, max));
+    }
+    t.addEventListener('change', function () { t.removeAttribute('data-times'); fill(); });
+    fill();
+  })();
+  </script>
   {% endif %}
 </section>
 

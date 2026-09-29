@@ -23,7 +23,7 @@
     </div>
     <div class="row-actions no-print">
       <button class="btn ghost small" type="button" onclick="window.print()">打印 / 存 PDF</button>
-      {% if prev and is_owner %}<a class="btn small ghost" href="/compare?ids={{ prev['video']['id'] }},{{ video['id'] }}">与上次对比</a>{% endif %}
+      {% if prev and is_owner %}<a class="btn small ghost" href="/compare?ids={{ prev['video']['id'] }},{{ video['id'] }}">与同主题上次对比</a>{% endif %}
       <form class="inline-form" method="post" action="/videos/{{ video['id'] }}/analyze">
         <button class="btn small" type="submit"
                 onclick="return confirm('重新分析会覆盖当前报告，继续？')">重新分析</button>
@@ -48,7 +48,7 @@
         </div>
         <div>本次次序<b>第 {{ rank }} / {{ total_runs }} 次</b></div>
         {% if prev %}
-        <div>较上次<b class="{{ 'delta-up' if report['total'] > prev['video']['total'] else ('delta-down' if report['total'] < prev['video']['total'] else '') }}">
+        <div>较同主题上次<b class="{{ 'delta-up' if report['total'] > prev['video']['total'] else ('delta-down' if report['total'] < prev['video']['total'] else '') }}">
           {{ '%+g' % (report['total'] - prev['video']['total']) }}</b></div>
         {% endif %}
         <div>评审通道<b style="font-size:13px">文本 · 画面 · 语音</b></div>
@@ -82,7 +82,7 @@
     {% for para in report['summary'].split('\n') if para.strip() %}<p>{{ para.strip() }}</p>{% endfor %}
   </div>
   {% if report['next_focus'] %}
-  <div class="focus"><b>下一步只练一件事</b><span>{{ report['next_focus'] }}</span></div>
+  <div class="focus"><b>下一步只练一件事</b><span>{{ report['next_focus'] | droplabel('下一步只练一件事') }}</span></div>
   {% endif %}
 </section>
 
@@ -276,31 +276,88 @@
 </section>
 {% endif %}
 
-{% if prev %}
-<section class="sheet">
-  <div class="section-title" style="margin-top:0"><h2>与上一次逐项对照</h2>
-    <span>上次：{{ prev['video']['title'] }}（{{ prev['video']['analyzed_at'] | dt }}）</span></div>
+{% if vs_cols %}
+<section class="sheet" id="vs-box">
+  <div class="section-title" style="margin-top:0">
+    <h2>与同主题最近 {{ vs_n }} 次逐项对照</h2>
+    <span class="tag-wrap"><span class="tag">主题：{{ vs_sel['label'] }}</span></span>
+  </div>
+  {% if is_owner and vs_topics %}
+  <div class="row-actions no-print" style="margin-bottom:12px">
+    <form method="get" action="/videos/{{ video['id'] }}" class="inline-form pick-bar" id="vs-form">
+      <label class="dim-text" for="vs-topic">选择主题</label>
+      <select id="vs-topic" name="vs_topic" class="pick-topic">
+        {% for o in vs_topics %}
+        <option value="{{ o['anchor'] }}" data-m="{{ o['m'] }}" {{ 'selected' if o['anchor'] == vs_sel['anchor'] }}>{{ o['label'] }}</option>
+        {% endfor %}
+      </select>
+      <label class="dim-text" for="vs-n">对比次数</label>
+      <select id="vs-n" name="vs_n" class="pick-times">
+        {% for k in range(1, vs_max + 1) %}
+        <option value="{{ k }}" {{ 'selected' if k == vs_n }}>最近 {{ k }} 次</option>
+        {% endfor %}
+      </select>
+      <button class="btn ghost" type="submit">对比</button>
+    </form>
+  </div>
+  <script>
+  (function () {
+    var form = document.getElementById('vs-form');
+    var t = document.getElementById('vs-topic');
+    var n = document.getElementById('vs-n');
+    if (!form || !t || !n) return;
+    function show() {
+      var cur = t.options[t.selectedIndex];
+      t.title = cur ? cur.text.trim() : '';
+    }
+    function fill() {
+      var cur = t.options[t.selectedIndex];
+      var max = Math.min(parseInt(cur ? cur.getAttribute('data-m') : '0', 10) || 0, 5);
+      n.innerHTML = '';
+      for (var k = 1; k <= max; k++) n.appendChild(new Option('最近 ' + k + ' 次', String(k)));
+      n.value = String(Math.min(3, max));
+      show();
+    }
+    t.addEventListener('change', fill);
+    show();
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!n.value) return;
+      location.href = form.getAttribute('action') + '?vs_topic=' + encodeURIComponent(t.value)
+                    + '&vs_n=' + encodeURIComponent(n.value) + '#vs-box';
+    });
+  })();
+  </script>
+  {% endif %}
   <div class="table-wrap narrow">
   <table class="sheet-table">
-    <thead><tr><th>维度</th><th class="num">上次</th><th class="num">本次</th><th class="num">Δ</th></tr></thead>
+    <thead><tr><th>维度</th>
+      {% for c in vs_cols %}<th class="num">近{{ loop.revindex }}</th>{% endfor %}
+      <th class="num">本次</th><th class="num">Δ</th></tr></thead>
     <tbody>
       {% for d in dims %}
-      {% set before = (prev['dims'].get(d['key']) or {}).get('score') %}
+      {% set latest = (vs_cols[-1]['dims'].get(d['key']) or {}).get('score') %}
       <tr>
         <td>{{ d['name'] }}</td>
+        {% for c in vs_cols %}
+        {% set before = (c['dims'].get(d['key']) or {}).get('score') %}
         <td class="num">{{ before if before is not none else '—' }}</td>
+        {% endfor %}
         <td class="num">{{ d['score'] | g }}</td>
-        <td class="num {{ 'delta-up' if before is not none and d['score'] > before else ('delta-down' if before is not none and d['score'] < before else 'delta-flat') }}">
-          {% if before is not none %}{{ '%+g' % (d['score'] - before) }}{% else %}—{% endif %}</td>
+        <td class="num {{ 'delta-up' if latest is not none and d['score'] > latest else ('delta-down' if latest is not none and d['score'] < latest else 'delta-flat') }}">
+          {% if latest is not none %}{{ '%+g' % (d['score'] - latest) }}{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
-      <tr><td><b>总分</b></td><td class="num">{{ prev['video']['total'] | g }}</td>
+      <tr><td><b>总分</b></td>
+        {% for c in vs_cols %}<td class="num">{{ c['video']['total'] | g }}</td>{% endfor %}
         <td class="num"><b>{{ report['total'] | g }}</b></td>
-        <td class="num {{ 'delta-up' if report['total'] > prev['video']['total'] else ('delta-down' if report['total'] < prev['video']['total'] else 'delta-flat') }}">
-          {{ '%+g' % (report['total'] - prev['video']['total']) }}</td></tr>
+        <td class="num {{ 'delta-up' if report['total'] > vs_cols[-1]['video']['total'] else ('delta-down' if report['total'] < vs_cols[-1]['video']['total'] else 'delta-flat') }}">
+          {{ '%+g' % (report['total'] - vs_cols[-1]['video']['total']) }}</td></tr>
     </tbody>
   </table>
   </div>
+  <p class="dim-text" style="font-size:12px;margin-top:8px">近1 = 本主题中距本次最近的一次，Δ 按近1计算 ·
+    {% for c in vs_cols %}近{{ loop.revindex }}：{{ c['video']['title'] }}（{{ c['video']['analyzed_at'] | dt }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>
 </section>
 {% endif %}
 

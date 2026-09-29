@@ -191,16 +191,22 @@ main {
   margin-bottom: 10px;
 }
 
+/* flex 行内放长文本（整句题目）时，子项默认 min-width:auto 不肯收缩，
+   长标签会抢光整行宽度，把同排 h2 压到最小内容宽（中文因此一字一列竖排），
+   标签自身再冲出右边界。
+   解法：容器允许换行 + 标签给 min-width:0（取消"不肯小于内容宽"的保护）+ 词内断行。
+   刻意不给 flex-grow，短标签仍然靠 margin-left:auto 贴着右端，位置不变。 */
 .section-title {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 6px 14px;
   border-bottom: 2px solid var(--ink);
   padding-bottom: 8px;
   margin: 34px 0 18px;
 }
 
-.section-title h2 { margin: 0; font-size: 20px; letter-spacing: .12em; }
+.section-title h2 { margin: 0; font-size: 20px; letter-spacing: .12em; flex: 0 0 auto; }
 
 .section-title span {
   font-family: var(--font-mono);
@@ -208,6 +214,8 @@ main {
   letter-spacing: .16em;
   color: var(--ink-3);
   margin-left: auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .lede { font-size: 17.5px; color: var(--ink-2); max-width: 58em; }
@@ -256,6 +264,25 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 26px 0; }
   background: #fbf8f0;
   color: var(--ink-2);
   white-space: nowrap;
+}
+
+/* 长内容（如整句题目）允许换行：nowrap 胶囊会被超长文本撑破页面宽度；
+   多行时 999px 圆角会被压成上下两个大半圆，所以换行变体改用固定小圆角 */
+.tag-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border-radius: 10px;
+  max-width: 100%;
+  line-height: 1.6;
+}
+
+/* .tag-wrap 套在 .tag 外层时，内层胶囊自己带 nowrap 照样撑破容器，这里一并解开 */
+.tag-wrap .tag {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border-radius: 10px;
+  max-width: 100%;
+  line-height: 1.6;
 }
 
 .tag-ink { background: var(--ink); color: var(--paper); border-color: var(--ink); }
@@ -491,6 +518,20 @@ details.ev .ev-in { padding-top: 10px; padding-bottom: 10px; }
 }
 .time-chip:hover { background: var(--teal); color: #fff; border-color: var(--teal); }
 
+/* 主题快选条：对比页里按模糊归组后的主题一键圈选。 */
+.chip-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip {
+  font-size: 12.5px;
+  border: 1px solid var(--rule-2);
+  background: #fbf8f0;
+  color: var(--teal);
+  padding: 2px 11px;
+  border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.chip:hover { background: var(--teal); color: #fff; border-color: var(--teal); }
+
 .strength { font-size: 14.5px; color: var(--ink-2); margin: 0 0 6px; padding-left: 18px; position: relative; }
 .strength::before { content: "✓"; position: absolute; left: 0; color: var(--olive); font-family: var(--font-mono); font-size: 12px; }
 
@@ -629,10 +670,12 @@ blockquote.pull {
 
 /* ------------------------------------------------------------------ 表单 */
 form.stack { display: grid; gap: 16px; max-width: 520px; }
+/* 上传表单：四个输入框纵向平铺，一框一行、等宽对齐 */
+.upload-form { display: grid; gap: 20px; }
 .field { display: grid; gap: 5px; }
 .field > label {
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .16em;
-  text-transform: uppercase; color: var(--ink-3);
+  font-family: var(--font-mono); font-size: 13.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-2); font-weight: 600;
 }
 .field input[type="text"], .field input[type="password"], .field input[type="file"],
 .field textarea, .field select {
@@ -649,21 +692,34 @@ form.stack { display: grid; gap: 16px; max-width: 520px; }
 .drop {
   border: 1.5px dashed var(--rule-2); background: #fbf8f0;
   padding: 20px; text-align: center; font-family: var(--font-mono);
-  font-size: 12.5px; color: var(--ink-3);
+  font-size: 14px; color: var(--ink-3);
 }
-.drop input[type="file"] { border: 0; background: none; font-family: var(--font-mono); font-size: 12.5px; }
+.drop input[type="file"] { border: 0; background: none; font-family: var(--font-mono); font-size: 14px; padding: 0; }
 
+/* 原生「选择文件」按钮只能通过 ::file-selector-button 改，input[type=file] 自身的字号管不到它。
+   尺寸与 .btn 基准同档（14px / 12×20），配色沿用墨青实心，避免页面里出现一个灰色系统按钮 */
+.drop input[type="file"]::file-selector-button {
+  font-family: var(--font-mono); font-size: 14px; letter-spacing: .14em; text-transform: uppercase;
+  color: #fff; background: var(--teal); border: 1px solid var(--teal);
+  padding: 12px 20px 11px; margin: 0 12px 8px 0; cursor: pointer; border-radius: 0;
+}
+.drop input[type="file"]::file-selector-button:hover { background: #17496b; border-color: #17496b; color: #fff; }
+
+/* 按钮三档（尺寸与配色分工见设计报告 §13）：
+   .btn = 墨青实心（普通操作，全站基准 14px / 14×26）
+   .btn.cta = 朱砂实心 + 3px 硬阴影（每个区块只给一个主行动，见下方）
+   .btn.ghost = 墨青描边（次要、可逆动作）；.btn.small = 表格行内密集动作 */
 .btn {
-  font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .14em; text-transform: uppercase;
-  background: var(--ink); color: var(--paper); border: 1px solid var(--ink);
-  padding: 11px 22px 10px; cursor: pointer; border-radius: 0;
+  font-family: var(--font-mono); font-size: 14px; letter-spacing: .14em; text-transform: uppercase;
+  background: var(--teal); color: #fff; border: 1px solid var(--teal);
+  padding: 14px 26px 13px; cursor: pointer; border-radius: 0;
   transition: transform .12s ease, box-shadow .18s ease, background .18s ease;
 }
-.btn:hover { background: var(--seal); border-color: var(--seal); color: #fff; transform: translateY(-1px); box-shadow: 0 6px 14px -8px rgba(179,52,31,.8); }
+.btn:hover { background: #17496b; border-color: #17496b; color: #fff; transform: translateY(-1px); box-shadow: 0 6px 14px -8px rgba(31,95,139,.9); }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-.btn.ghost { background: none; color: var(--ink); border-color: var(--rule-2); }
-.btn.ghost:hover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-.btn.small { font-size: 11px; padding: 6px 12px 5px; letter-spacing: .1em; }
+.btn.ghost { background: none; color: var(--teal); border-color: var(--teal); }
+.btn.ghost:hover { background: var(--teal); color: #fff; border-color: var(--teal); }
+.btn.small { font-size: 13px; padding: 11px 18px 10px; letter-spacing: .1em; }
 .btn.link { background: none; border: 0; color: var(--ink-3); padding: 6px 4px; }
 .btn.link:hover { color: var(--seal); background: none; box-shadow: none; transform: none; text-decoration: underline; }
 /* 主行动按钮：每个区块只给一个，用朱砂实心 + 放大字距把注意力收过来。 */
@@ -687,6 +743,29 @@ form.stack { display: grid; gap: 16px; max-width: 520px; }
 
 .row-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .inline-form { display: inline; }
+
+/* 「主题 + 次数」对照表单（对比页与报告页对照区共用一套尺寸）。
+   浏览器按最长 option 给 <select> 定宽，长题目会把下拉撑满整行，
+   这里显式限宽并用省略号收住，完整题目由 JS 写进 title 悬停可见；
+   两个下拉同字号同内边距，次数框另给最小宽度，避免一宽一窄不协调。 */
+.pick-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pick-bar > label {
+  font-family: var(--font-mono); font-size: 15px; letter-spacing: .06em;
+  color: var(--ink-2); font-weight: 600; flex: 0 0 auto;
+}
+.pick-bar > select {
+  font-family: var(--font-body); font-size: 16px; color: var(--ink);
+  background: #fbf8f0; border: 1px solid var(--rule-2); border-bottom-width: 2px;
+  padding: 10px 12px; border-radius: 0; min-width: 0;
+}
+.pick-bar > select:focus { outline: none; border-color: var(--ink); background: #fffdf7; }
+.pick-bar > .pick-topic {
+  flex: 1 1 260px; max-width: 460px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding-right: 32px;
+}
+.pick-bar > .pick-times { flex: 0 0 auto; min-width: 152px; padding-right: 30px; }
+.pick-bar > .btn { flex: 0 0 auto; }
 
 /* 页头：标题 + 右侧动作条。窄屏靠 flex-wrap 自然沉底，不需要 JS 参与。 */
 .head-flex { display: flex; gap: 26px; align-items: flex-end; flex-wrap: wrap; }
@@ -741,6 +820,21 @@ form.stack { display: grid; gap: 16px; max-width: 520px; }
   position: absolute; inset: 0 auto 0 0; background:
     repeating-linear-gradient(135deg, var(--ink) 0 8px, #33302b 8px 16px);
   transition: width .8s cubic-bezier(.2, .8, .2, 1);
+}
+
+/* 进度条下方的读数：百分比是用户唯一关心的数字，抬到 26px 加粗朱砂；
+   右侧体积/速度/提示仍走小字等宽，两者用 .pct-line 分成左右两栏 */
+.pct-line {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px 16px; flex-wrap: wrap; margin-top: 6px;
+}
+.pct-big {
+  font-family: var(--font-mono); font-size: 26px; font-weight: 700; line-height: 1.1;
+  color: var(--seal); font-variant-numeric: tabular-nums; letter-spacing: .02em;
+}
+.pct-meta {
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-3);
+  min-width: 0; overflow-wrap: anywhere;
 }
 
 .spinner {
@@ -1013,16 +1107,20 @@ footer.foot .foot-flow { margin-left: auto; }
   }
   .pin-first tbody tr:hover td:first-child { background: var(--pin-bg); }
 
-  /* —— 触控命中区：正文按钮与控件按 44px 级别放大 —— */
-  .btn { padding: 12px 18px 11px; font-size: 12px; }
-  .btn.small { padding: 9px 13px 8px; font-size: 11px; }
+  /* —— 触控命中区：字号不低于桌面基准，只收窄左右内边距换取一行放得下 —— */
+  .btn { padding: 13px 18px 12px; font-size: 14px; }
+  .btn.small { padding: 10px 14px 9px; font-size: 13px; }
   .btn.link { padding: 10px 8px; }
   .btn:hover { transform: none; box-shadow: none; }
-  .btn.cta { padding: 15px 20px 14px; font-size: 13.5px; width: 100%; }
+  .btn.cta { padding: 15px 20px 14px; font-size: 14px; width: 100%; }
   .btn.cta:active { transform: none; }
   .script-cta-box { gap: 12px; padding: 14px 13px; }
   .task-progress { padding: 13px 13px 14px; }
   .row-actions { gap: 8px 10px; }
+  .pick-bar { gap: 8px 10px; }
+  .pick-bar > select { padding: 12px; }
+  .pick-bar > .pick-topic { flex: 1 1 100%; max-width: 100%; }
+  .pick-bar > .pick-times { flex: 1 1 100%; min-width: 0; }
   .head-flex { gap: 14px; }
   .time-chip { padding: 5px 9px; font-size: 11.5px; }
   input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
@@ -1106,7 +1204,7 @@ footer.foot .foot-flow { margin-left: auto; }
   .score-max { font-size: 13px; }
   .seal-badge { width: 62px; height: 62px; font-size: 28px; }
   .nav a { padding: 11px 6px; font-size: 11.5px; letter-spacing: .04em; }
-  .btn { padding: 12px 14px 11px; }
+  .btn { padding: 13px 15px 12px; }
   .ledger div { border-right: 0; }
   .dim-head { grid-template-columns: 20px minmax(0, 1fr) 56px; }
 }

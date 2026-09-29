@@ -40,9 +40,9 @@
     <div class="progress-rail" style="margin:18px 0 6px">
       <i id="rail" style="width: {{ current }}%"></i>
     </div>
-    <div class="mono" style="font-size:12px;color:var(--ink-3);display:flex;justify-content:space-between">
-      <span id="pct-text">{{ current }}%</span>
-      <span>通常 1–4 分钟 · 可离开本页，稍后回来查看</span>
+    <div class="pct-line">
+      <span id="pct-text" class="pct-big">{{ current }}%</span>
+      <span class="pct-meta">通常 1–4 分钟 · 可离开本页，稍后回来查看</span>
     </div>
 
     <ul class="stage-list">
@@ -71,7 +71,7 @@
 
     <div class="row-actions" style="margin-top:22px">
       <a class="btn ghost" href="{{ '/admin' if me['role'] == 'admin' else '/dashboard' }}">返回{% if me['role'] == 'admin' %}后台{% else %}记录{% endif %}</a>
-      {% if video['topic'] %}<span class="tag">题目：{{ video['topic'] }}</span>{% endif %}
+      {% if video['topic'] %}<span class="tag tag-wrap">题目：{{ video['topic'] }}</span>{% endif %}
     </div>
   {% endif %}
 </section>
